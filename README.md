@@ -1,2 +1,7 @@
 # the-future-goat-
-for a science project that i want to work on 
+
+
+# Potential Ideas for what the model does
+
+- predict medical diseases
+- connect it to boards and make an innovative product with it 
