@@ -5,7 +5,6 @@ import cv2
 cascade_path = cv2.data.haarcascades + "haarcascade_frontalface_default.xml"
 face_cascade = cv2.CascadeClassifier(cascade_path)
 
-
 cap = cv2.VideoCapture(0)
 
 while True: 
@@ -25,6 +24,17 @@ while True:
     
     for (x, y, w, h) in faces:
         cv2.rectangle(frame, (x, y), (x + w, y + h), (0, 255, 0), 2)
+
+        label = "Face"
+        font = cv2.FONT_HERSHEY_SIMPLEX
+        font_scale = 0.8 
+        font_thickness = 2
+
+        text_size = cv2.getTextSize(label, font, font_scale, font_thickness)[0]
+
+        label_position = (x, y -10)
+
+        cv2.putText(frame, label, label_position, font, font_scale, (0, 255, 0), font_thickness)
 
     cv2.imshow("Face Detection", frame)
 
