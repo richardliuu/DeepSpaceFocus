@@ -1,1 +1,0 @@
-# First Computer Vision Test 
