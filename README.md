@@ -13,6 +13,12 @@ Concentration Score (Measured from 0-100)
 
 
 
+Algorithm:
+
+Concentration Score
+
+
+
 
 
 
