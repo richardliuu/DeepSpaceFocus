@@ -2,7 +2,9 @@
 
 import cv2 
 
-face_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + "haarcasecades_frontalface_default.xml")
+cascade_path = cv2.data.haarcascades + "haarcascade_frontalface_default.xml"
+face_cascade = cv2.CascadeClassifier(cascade_path)
+
 
 cap = cv2.VideoCapture(0)
 
@@ -22,15 +24,15 @@ while True:
                                           )
     
     for (x, y, w, h) in faces:
-        cv2.rectangle(frame, (x, y), (x + w +  y + h), (0, 255, 0), 2)
+        cv2.rectangle(frame, (x, y), (x + w, y + h), (0, 255, 0), 2)
 
     cv2.imshow("Face Detection", frame)
 
     if cv2.waitKey(1) & 0xFF == ord('q'):
         break 
 
-    cap.release()
-    cv2.destroyAllWindows()
+cap.release()
+cv2.destroyAllWindows()
 
 
 
@@ -38,4 +40,8 @@ while True:
 
 import os 
 
+haar_path = cv2.data.haarcascades 
+print("Haarcascade path", haar_path)
+
+print("Available Haar cascades:", os.listdir(haar_path))
 
