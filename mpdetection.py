@@ -6,13 +6,17 @@ import time
 
 mp_face_mesh = mp.solutions.face_mesh
 face_mesh = mp_face_mesh.FaceMesh(min_detection_confidence=0.5, min_tracking_confidence=0.5)
+mp_pose = mp.solutions.pose
+pose = mp_pose.Pose()
 
 cap = cv2.VideoCapture(0)
 
 # Starting with empty lists so they can be filled 
 time_stamps = []
-head_tilt_values = []
-eye_blink_values = []
+head_stability_values = []
+face_neutrality = []
+eye_gaze_values = []
+light_change_values = []
 
 start_time = time.time()
 
@@ -21,15 +25,38 @@ fig, ax1 = plt.subplots()
 
 # Primary axis (Head Tilt - Red)
 ax1.set_xlabel("Time (seconds)")
-ax1.set_ylabel("Head Tilt Movement", color='r')
-line1, = ax1.plot([], [], 'r-', label="Head Tilt (Y-Distance)")
+ax1.set_ylabel("Head Stability", color='r')
+line1, = ax1.plot([], [], 'r-', label="Head Stability")
 ax1.tick_params(axis='y', labelcolor='r')
 
 # Secondary axis (Eye Blink - Blue)
 ax2 = ax1.twinx()
-ax2.set_ylabel("Eye Blink (EAR)", color='b')
-line2, = ax2.plot([], [], 'b-', label="Eye Blink (EAR)")
+ax2.set_ylabel("Eye Gaze Stability", color='b')
+line2, = ax2.plot([], [], 'b-', label="Eye Gaze Stability")
 ax2.tick_params(axis='y', labelcolor='b')
+
+def calculate_face_neutrality(face_landmarks):
+    return np.random.uniform(0.7, 1.0)
+
+def calculate_head_stability(pose_landmarks):
+    if pose_landmarks:
+        nose = pose_landmarks.landmark[mp_pose.PoseLandmark.NOSE]
+        return nose.y
+    return 0
+
+def calculate_light_changes(frame):
+    return np.mean(cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY))
+
+def calculate_eye_gaze_stability(face_landmarks):
+    left_eye = [face_landmarks.landmark[i] for i in [159, 145]]
+    right_eye = [face_landmarks.landmark[i] for i in [386, 374]]
+    left_ear = abs(left_eye[0].y - left_eye[1].y) 
+    right_ear = abs(right_eye[0].y - right_eye[1].y) 
+    return (left_ear + right_ear) / 2 * 100
+
+# Need to modify the metrics that are tracked
+# New metrics for the concentration algorithm
+# Still need to keep the shape indicators 
 
 while cap.isOpened():
     ret, frame = cap.read()
@@ -91,7 +118,7 @@ while cap.isOpened():
             plt.draw()
             plt.pause(0.01)
 
-    cv2.imshow("Head & Eye Tracking", frame)
+    cv2.imshow("Concentration Monitoring", frame)
 
     if cv2.waitKey(1) & 0xFF == ord('q'):
         break
@@ -101,6 +128,20 @@ cv2.destroyAllWindows()
 plt.ioff()
 plt.show()
 
-        
+# Calculating Concentration Score 
+
+#Concentration Score = w1(Face Neutrality) + w2(Head Stability) + w3(Task Engagement) + w4(Eye Gaze Stability) + w5(Changes in Light) 
+
+# Equal Weighting (Subject to change)
+
+
+"""
+def concentration_score(face_landmarks, pose_landmarks, frame):
+    w1, w2, w3, w4, w5 = 1, 1, 1, 1, 1
+    face_neutrality = calculate_face_neutrality(face_landmarks)
+    head_stability = calculate_head_stability(pose_landmarks)
+    task_engagement = calculate_task_engagement(face_landmarks)
+    light_changes = calculate_light_changes(frame)"
+"""
 
 

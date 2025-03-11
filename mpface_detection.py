@@ -1,3 +1,5 @@
+# First Test, don't really need this 
+
 import cv2
 import mediapipe as mp
 
