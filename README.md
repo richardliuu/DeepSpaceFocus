@@ -9,6 +9,12 @@ Should be converted to an instructions/info file at the end of the project
 4. Eye Gaze Stability 
 5. Changes in Light 
 
+# Audio
+
+1. Audio Patterns  
+2.
+3.
+
 # Dependent Variables 
 
 Concentration Score (Measured from 0-100)

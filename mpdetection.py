@@ -3,12 +3,28 @@ import mediapipe as mp
 import matplotlib.pyplot as plt
 import numpy as np
 import time
+import pyaudio
+import audioop
+import threading 
+import queue
+import math
+
+from scipy.signal import find_peaks
 
 import os 
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '0'
 
 # Set to 0 to avoid messages 
 # 2 for warnings 
+
+# Audio parameters
+CHUNK = 1024 
+FORMAT = pyaudio.paInt16 
+CHANNELS = 1 
+RATE = 16000
+AUDIO_WINDOW = 5 # seconds of audio to analyze for patterns
+
+p = pyaudio.PyAudio()
 
 # Initialize MediaPipe solutions
 mp_face_mesh = mp.solutions.face_mesh
@@ -25,10 +41,12 @@ face_neutrality_values = []
 eye_gaze_values = []
 light_change_values = []
 task_engagement_values = []
+audio_level_values = []
+audio_pattern_values = []
 concentration_scores = []
 
 # Weights for concentration score calculation
-w1, w2, w3, w4, w5 = 0.25, 0.25, 0.2, 0.2, 0.1
+w1, w2, w3, w4, w5, w6, w7 = 0.2, 0.2, 0.15, 0.15, 0.1, 0.1, 0.1
 
 # Reference values for normalization
 baseline_movement = 0
