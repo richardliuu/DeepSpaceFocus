@@ -14,10 +14,17 @@ import scipy.stats
 from scipy.signal import find_peaks
 
 import os 
-os.environ['TF_CPP_MIN_LOG_LEVEL'] = '0'
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
+
+import tensorflow as tf
+tf.get_logger().setLevel('ERROR')
 
 # Set to 0 to avoid messages 
 # 2 for warnings 
+
+# Frame 
+update_interval = 10
+frame_count = 0
 
 # Audio parameters
 CHUNK = 1024 
@@ -27,20 +34,6 @@ RATE = 16000
 AUDIO_WINDOW = 5 # seconds of audio to analyze for patterns
 
 p = pyaudio.PyAudio()
-
-global stop_audio 
-
-stream = p.open(format=FORMAT, 
-                channels=CHANNELS,
-                rate=RATE,
-                input=True,
-                frames_per_buffer=CHUNK,
-                stream_callback=audio_callback)
-
-audio_thread = threading.Thread(target=process_audio)
-audio_thread.daemon = True
-audio_thread.start()
-
 
 # Initialize MediaPipe solutions
 mp_face_mesh = mp.solutions.face_mesh
@@ -80,7 +73,7 @@ start_time = time.time()
 
 # Set up interactive plotting
 plt.ion() 
-fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(10, 8))
+fig, (ax1, ax2, ax3) = plt.subplots(3, 1, figsize=(10, 8))
 
 # Primary plot for individual metrics
 ax1.set_title("Individual Concentration Metrics")
@@ -91,7 +84,6 @@ face_line, = ax1.plot([], [], 'g-', label="Face Neutrality")
 eye_line, = ax1.plot([], [], 'b-', label="Eye Gaze Stability")
 task_line, = ax1.plot([], [], 'c-', label="Task Engagement")
 light_line, = ax1.plot([], [], 'y-', label="Light Stability")
-audio_line, = ax1.plot([], [], 'm-', label="Audio Environment")
 ax1.legend(loc="upper right")
 
 # Secondary plot for overall concentration score
@@ -100,6 +92,13 @@ ax2.set_xlabel("Time (seconds)")
 ax2.set_ylabel("Concentration Score")
 concentration_line, = ax2.plot([], [], 'k-', linewidth=2)
 ax2.set_ylim(0, 1)
+
+ax3.set_title("Audio Metrics")
+ax3.set_xlabel("Time (Seconds)")
+ax3.set_ylabel(("Metric Values"))
+audio_volume_line, = ax3.plot([], [], 'm-', label="Audio Environment")
+audio_pattern_line, = ax3.plot([], [], 'g-', label="Audio Pattern")
+ax3.legend(loc="upper right")
 
 def audio_callback(in_data, frame_count, time_info, status):
     # Audio streaming through a call back function
@@ -131,7 +130,7 @@ def analyze_audio_patterns(audio_buffer, sample_rate):
         spec_score = 0.5 
 
 
-    # Checking for rhythm regularity through autocorrelation (find out what that is)
+    # Checking for rhythm regularity through autocorrelation (measures relationship of variables with a lagged value)
     if len(samples) > 1024:
         corr = np.correlate(samples, samples, mode='full')
         corr = corr[len(corr)//2:]
@@ -161,17 +160,26 @@ def process_audio():
     # Processing audio in the background
     global audio_level, audio_pattern, audio_buffers, stop_audio
 
+    # Debug statement
+    print("Audio processing thread started")
+
     while not stop_audio:
         try:
             data = audio_queue.get(timeout=1)
+
+            # Debug statement 
+            print(f"Got audio data: {len(data)} bytes, queue size: {audio_queue.qsize()}")
 
             # Volume level
             rms = audioop.rms(data, 2)
             if rms > 0:
                 decibel = 2 * math.log10(rms)
 
+                # Debug statement
+                print(f"Raw RMS: {rms}, Decibel: {decibel}")
+
                 # Normalize for the 0-1 range (avg speech = 40-60db)
-                normalized_db = max(0, min(1.0, (decibel-30) / 40))
+                normalized_db = max(0, min(1.0, (decibel-10) / 40))
 
             else:
                 normalized_db = 0
@@ -206,6 +214,9 @@ def process_audio():
                 else:
                     pattern_type = "Unstable"
             
+            # Debug Statement 
+            print(f"Processed audio: level={audio_level:.2f}, pattern={audio_pattern:.2f}")
+
             audio_queue.task_done()
         except queue.Empty:
             continue
@@ -354,12 +365,30 @@ prev_head_pos = None
 prev_light = None
 prev_gaze = None
 
-stream.start_stream()
+
+
+stream = p.open(format=FORMAT, 
+                channels=CHANNELS,
+                rate=RATE,
+                input=True,
+                frames_per_buffer=CHUNK,
+                stream_callback=audio_callback)
+
+audio_thread = threading.Thread(target=process_audio)
+audio_thread.daemon = True
+audio_thread.start()
+
+stream.start_stream() 
+
+# To reduce the computational power required
+plt.tight_layout()
 
 while cap.isOpened():
     ret, frame = cap.read()
     if not ret:
         break
+
+    frame_count += 1
 
     # Convert to RGB for MediaPipe
     rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
@@ -431,33 +460,45 @@ while cap.isOpened():
                     cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
 
         # Update plots
-        head_line.set_xdata(time_stamps)
-        head_line.set_ydata(head_stability_values)
-        
-        face_line.set_xdata(time_stamps)
-        face_line.set_ydata(face_neutrality_values)
-        
-        eye_line.set_xdata(time_stamps)
-        eye_line.set_ydata(eye_gaze_values)
-        
-        task_line.set_xdata(time_stamps)
-        task_line.set_ydata(task_engagement_values)
-        
-        light_line.set_xdata(time_stamps)
-        light_line.set_ydata(light_change_values)
-        
-        concentration_line.set_xdata(time_stamps)
-        concentration_line.set_ydata(concentration_scores)
-        
-        # Adjust plot limits
-        ax1.set_xlim(0, max(10, elapsed_time))
-        ax1.set_ylim(0, 1.1)
-        
-        ax2.set_xlim(0, max(10, elapsed_time))
-        
-        plt.tight_layout()
-        plt.draw()
-        plt.pause(0.01)
+        if frame_count >= update_interval:
+            head_line.set_xdata(time_stamps)
+            head_line.set_ydata(head_stability_values)
+            
+            face_line.set_xdata(time_stamps)
+            face_line.set_ydata(face_neutrality_values)
+            
+            eye_line.set_xdata(time_stamps)
+            eye_line.set_ydata(eye_gaze_values)
+            
+            task_line.set_xdata(time_stamps)
+            task_line.set_ydata(task_engagement_values)
+            
+            light_line.set_xdata(time_stamps)
+            light_line.set_ydata(light_change_values)
+
+    # Need to graph both audio level and pattern
+    # Could seperate the graphs to make it easier to see from the other metrics 
+
+            audio_volume_line.set_xdata(time_stamps)
+            audio_volume_line.set_ydata(audio_level_values)
+            audio_pattern_line.set_xdata(time_stamps)
+            audio_pattern_line.set_ydata(audio_pattern_values)
+            
+            concentration_line.set_xdata(time_stamps)
+            concentration_line.set_ydata(concentration_scores)
+            
+            # Adjust plot limits
+            ax1.set_xlim(0, max(10, elapsed_time))
+            ax1.set_ylim(0, 1.1)
+            
+            ax2.set_xlim(0, max(10, elapsed_time))
+            ax3.set_xlim(0, max(10, elapsed_time))
+            
+            plt.draw()
+            plt.pause(0.01)
+
+            # Resetting the frame counter 
+            frame_count = 0 
 
     # Display the frame
     cv2.imshow("Concentration Monitoring", frame)
