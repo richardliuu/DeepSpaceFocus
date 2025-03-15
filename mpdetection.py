@@ -11,6 +11,10 @@ import math
 import librosa
 import scipy.stats
 
+# Debug imports
+import traceback
+import sys 
+
 from scipy.signal import find_peaks
 
 import os 
@@ -213,6 +217,10 @@ def process_audio():
                     pattern_type = "Somewhat variable"
                 else:
                     pattern_type = "Unstable"
+
+        except Exception as e:
+            print("Thread error:", e)
+            traceback.print_exc(file=sys.stdout)
             
             # Debug Statement 
             print(f"Processed audio: level={audio_level:.2f}, pattern={audio_pattern:.2f}")
