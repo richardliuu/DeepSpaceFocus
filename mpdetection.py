@@ -77,7 +77,7 @@ start_time = time.time()
 
 # Set up interactive plotting
 plt.ion() 
-fig, (ax1, ax2, ax3) = plt.subplots(3, 1, figsize=(10, 8))
+fig, (ax1, ax2, ax3) = plt.subplots(3, 1, figsize=(8, 6))
 
 # Primary plot for individual metrics
 ax1.set_title("Individual Concentration Metrics")
@@ -177,7 +177,7 @@ def process_audio():
             # Volume level
             rms = audioop.rms(data, 2)
             if rms > 0:
-                decibel = 2 * math.log10(rms)
+                decibel = 20 * math.log10(rms)
 
                 # Debug statement
                 print(f"Raw RMS: {rms}, Decibel: {decibel}")
