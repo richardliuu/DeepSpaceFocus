@@ -171,6 +171,13 @@ def process_audio():
         try:
             data = audio_queue.get(timeout=1)
 
+            # Clearing the audio queue processing 
+            if audio_queue.qsize() > 50:
+                print(f"Clearing audio backlog: {audio_queue.qsize()} items")
+                while audio_queue.qsize() > 5:
+                    audio_queue.get_nowait()
+                    audio_queue.task_done()
+
             # Debug statement 
             print(f"Got audio data: {len(data)} bytes, queue size: {audio_queue.qsize()}")
 
@@ -501,6 +508,7 @@ while cap.isOpened():
             
             ax2.set_xlim(0, max(10, elapsed_time))
             ax3.set_xlim(0, max(10, elapsed_time))
+            ax3.set_ylim(0, 1)
             
             plt.draw()
             plt.pause(0.01)
