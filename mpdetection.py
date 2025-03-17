@@ -59,7 +59,7 @@ audio_pattern_values = []
 concentration_scores = []
 
 # Weights for concentration score calculation
-w1, w2, w3, w4, w5, w6, w7 = 0.2, 0.2, 0.15, 0.15, 0.1, 0.1, 0.1
+w1, w2, w3, w4, w5, w6, w7 = 0.2, 0.15, 0.15, 0.15, 0.1, 0.125, 0.125
 
 # Reference values for normalization
 baseline_movement = 0
