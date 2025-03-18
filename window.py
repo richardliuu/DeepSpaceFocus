@@ -13,6 +13,11 @@ w.pack()
 
 # Break Timer
 
+def show_timer(frame):
+    frame.tkraise()
+
+container = tk.Frame(r)
+
 def open_break_timer():
     break_win =  Toplevel(r)
     break_win.title("Break Timer")
@@ -37,7 +42,7 @@ def select_time(event):
     label.config(text="Select a time: " + selected_time)
 
 label = tk.Label(text="Select a time: ")
-label.pack(pady=20)
+label.pack(pady=40)
 
 combo_box = ttk.Combobox(r, values=["Minutes", "Seconds", "Hours"])
 combo_box.pack(pady=10)
