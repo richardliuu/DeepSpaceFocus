@@ -2,14 +2,14 @@ import tkinter as tk
 from tkinter import *
 from tkinter import ttk
 
+# Upon opening the window, we automatically start on the help page (fix)
+
+
 # r = root 
 # Tkinter Window Setup
 r = tk.Tk()
 r.geometry("600x500")
 r.title("Monitoring Concentration")  # Replace with an application name 
-
-w = Label(r, text="Welcome to DeepSpaceFocus") 
-w.pack()
 
 container = tk.Frame(r)
 container.pack(fill="both", expand=True)
@@ -32,8 +32,13 @@ home_page.grid(row=0, column=0, sticky="nsew")
 home_menu = Menu(menu)
 menu.add_cascade(label="Home", menu=home_menu)
 home_menu.add_command(label="Home", command=lambda: show_frame(home_page))
+welcome = Label(home_page, text="Welcome to DeepSpaceFocus").pack() 
+info = Label(home_page, text="filler").pack()
+
 
 menu.add_separator()
+
+show_frame(home_page)
 
 """Break Timer"""
 # Timer Menu
@@ -72,5 +77,6 @@ help_menu = Menu(menu)
 menu.add_cascade(label="Help", menu=help_menu)
 menu.add_separator()
 help_menu.add_command(label="Controls", command=lambda: show_frame(help_page))
+help_info = Label(help_page, text="filler").pack()
 
 r.mainloop()
