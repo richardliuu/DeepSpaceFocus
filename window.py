@@ -30,8 +30,6 @@ home_page = tk.Frame(container)
 frames["home"] = home_page
 home_label = tk.Label(home_page, text="Welcome to DeepSpaceFocus", font=("Arial", 14))
 home_label.pack(pady=20)
-stop_button = tk.Button(home_page, text="Stop", width=20, command=r.destroy)
-stop_button.pack()
 home_page.grid(row=0, column=0, sticky="nsew")
 
 home_menu = Menu(menu)
@@ -49,8 +47,6 @@ timer_page = tk.Frame(container)
 frames["timer"] = timer_page
 timer_label = tk.Label(timer_page, text="Set Timer", font=("Arial", 14))
 timer_label.pack(pady=20)
-stop_button = tk.Button(timer_page, text="Exit", width=20, command=r.destroy)
-stop_button.pack()
 timer_page.grid(row=0, column=0, sticky="nsew")
 
 show_frame(home_page)
@@ -58,7 +54,6 @@ show_frame(home_page)
 timer_menu = Menu(menu)
 menu.add_cascade(label="Timer", menu=timer_menu)
 timer_menu.add_command(label="Set Timer", command=lambda: show_frame(timer_page))
-
 
 # Change the command to going back to the home menu instead of destroying the window
 
