@@ -43,7 +43,6 @@ timer_page = tk.Frame(container)
 frames["timer"] = timer_page
 timer_page.grid(row=0, column=0, sticky="nsew")
 
-
 # Timer page title
 timer_title = Label(timer_page, text="Break Timer", font=("Arial", 14, "bold"))
 timer_title.grid(row=0, column=0, padx=20, pady=20, columnspan=3)
@@ -68,7 +67,6 @@ time_value_label.grid(row=2, column=0, padx=10, pady=10, sticky="e")
 time_entry = Entry(timer_page)
 time_entry.grid(row=2, column=1, padx=10, pady=10, sticky="w")
 
-
 # Function to update the selected time unit label
 def select_time(event):
     selected_time = time_unit_var.get()
@@ -81,7 +79,8 @@ def start_timer():
         time_value = float(time_entry.get())
 
         time_unit = time_unit_var.get()
-        if time_unit_var == "Minutes":
+        # Fixed the variable name here (was using time_unit_var instead of time_unit)
+        if time_unit == "Minutes":
             seconds = time_value * 60
         elif time_unit == "Hours":
             seconds = time_value * 3600
@@ -92,21 +91,21 @@ def start_timer():
         timer_window.title("Timer")
         timer_window.geometry("400x150")
 
-        countdown_label = Label(timer_window, text="Time Remaining")
-        countdown_label.pack(pady=50)
+        countdown_label = Label(timer_window, text="Time Remaining:", font=("Arial", 12))
+        countdown_label.pack(pady=10)  # Reduced padding
 
-        time_left_label = Label(timer_window, text ="")
+        time_left_label = Label(timer_window, text="", font=("Arial", 24))  # Added font size
         time_left_label.pack(pady=10)
 
-        stop_button = tk.Button(timer_window, text = "Stop Timer", bg="#F44336", fg="white", command=timer_window.destroy)
+        stop_button = tk.Button(timer_window, text="Stop Timer", bg="#F44336", fg="white", 
+                               command=timer_window.destroy)
         stop_button.pack(pady=10)
 
         def update_countdown(remaining):
             if remaining <= 0:
-                time_left_label.config(text="Time over")
-                
-                # Seems like a missing import, needs to be fixed
-                messagebox.showinfo("Break over")
+                time_left_label.config(text="Time's up!")
+                # Fixed missing message parameter
+                messagebox.showinfo("Break Timer", "Your break time is over!")
                 timer_window.destroy()
                 return
             
@@ -115,15 +114,16 @@ def start_timer():
 
             if hours > 0:
                 time_left_label.config(text=f"{hours:02d}:{mins:02d}:{secs:02d}")
-
             else:
-                time_left_label.config(text=F"{mins:02d}:{secs:02d}")
+                time_left_label.config(text=f"{mins:02d}:{secs:02d}")
 
             timer_window.after(1000, update_countdown, remaining - 1)
-
-            update_countdown(seconds)
+        
+        # Fixed indentation - this call was inside the update_countdown function
+        update_countdown(seconds)
     except ValueError:
-        messagebox.showerror("Please enter a valid number")    
+        # Fixed missing message parameter
+        messagebox.showerror("Input Error", "Please enter a valid number")    
 
 # Start button
 start_button = tk.Button(timer_page, text="Start Timer", bg="#4CAF50", fg="white", command=start_timer)
@@ -176,7 +176,6 @@ for frame in frames.values():
     frame.grid_columnconfigure(0, weight=1)
 
 # Show home page initially
-
 show_frame(frames["home"])
 
 r.mainloop()
