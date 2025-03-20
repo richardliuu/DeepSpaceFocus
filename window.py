@@ -1,6 +1,6 @@
 import tkinter as tk
 from tkinter import Menu, Label, Entry, StringVar
-from tkinter import ttk
+from tkinter import ttk, messagebox
 
 # Tkinter Window Setup
 r = tk.Tk()
@@ -22,7 +22,7 @@ r.config(menu=menu)
 def show_frame(frame):
     frame.tkraise()
 
-# ============= HOME PAGE =============
+# HOME PAGE 
 home_page = tk.Frame(container)
 frames["home"] = home_page
 home_page.grid(row=0, column=0, sticky="nsew")
@@ -38,10 +38,11 @@ home_info.grid(row=1, column=0, padx=20, pady=10, columnspan=3)
 home_description = Label(home_page, text="Use the menu above to navigate between features")
 home_description.grid(row=2, column=0, padx=20, pady=30, columnspan=3)
 
-# ============= TIMER PAGE =============
+# TIMER PAGE 
 timer_page = tk.Frame(container)
 frames["timer"] = timer_page
 timer_page.grid(row=0, column=0, sticky="nsew")
+
 
 # Timer page title
 timer_title = Label(timer_page, text="Break Timer", font=("Arial", 14, "bold"))
@@ -67,9 +68,6 @@ time_value_label.grid(row=2, column=0, padx=10, pady=10, sticky="e")
 time_entry = Entry(timer_page)
 time_entry.grid(row=2, column=1, padx=10, pady=10, sticky="w")
 
-# Start button
-start_button = tk.Button(timer_page, text="Start Timer", bg="#4CAF50", fg="white")
-start_button.grid(row=3, column=0, columnspan=3, padx=20, pady=20)
 
 # Function to update the selected time unit label
 def select_time(event):
@@ -78,7 +76,60 @@ def select_time(event):
 
 combo_box.bind("<<ComboboxSelected>>", select_time)
 
-# ============= HELP PAGE =============
+def start_timer():
+    try: 
+        time_value = float(time_entry.get())
+
+        time_unit = time_unit_var.get()
+        if time_unit_var == "Minutes":
+            seconds = time_value * 60
+        elif time_unit == "Hours":
+            seconds = time_value * 3600
+        else:
+            seconds = time_value
+
+        timer_window = tk.Toplevel()
+        timer_window.title("Timer")
+        timer_window.geometry("400x150")
+
+        countdown_label = Label(timer_window, text="Time Remaining")
+        countdown_label.pack(pady=50)
+
+        time_left_label = Label(timer_window, text ="")
+        time_left_label.pack(pady=10)
+
+        stop_button = tk.Button(timer_window, text = "Stop Timer", bg="#F44336", fg="white", command=timer_window.destroy)
+        stop_button.pack(pady=10)
+
+        def update_countdown(remaining):
+            if remaining <= 0:
+                time_left_label.config(text="Time over")
+                
+                # Seems like a missing import, needs to be fixed
+                messagebox.showinfo("Break over")
+                timer_window.destroy()
+                return
+            
+            mins, secs = divmod(int(remaining), 60)
+            hours, mins = divmod(mins, 60)
+
+            if hours > 0:
+                time_left_label.config(text=f"{hours:02d}:{mins:02d}:{secs:02d}")
+
+            else:
+                time_left_label.config(text=F"{mins:02d}:{secs:02d}")
+
+            timer_window.after(1000, update_countdown, remaining - 1)
+
+            update_countdown(seconds)
+    except ValueError:
+        messagebox.showerror("Please enter a valid number")    
+
+# Start button
+start_button = tk.Button(timer_page, text="Start Timer", bg="#4CAF50", fg="white", command=start_timer)
+start_button.grid(row=3, column=0, columnspan=3, padx=20, pady=20)    
+
+# HELP PAGE
 help_page = tk.Frame(container)
 frames["help"] = help_page
 help_page.grid(row=0, column=0, sticky="nsew")
