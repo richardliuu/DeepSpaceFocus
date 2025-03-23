@@ -26,7 +26,10 @@ tf.get_logger().setLevel('ERROR')
 #  ======= TKINTER WINDOW STARTUP ============ 
 
 import tkinter as tk
-from tkinter import tkk 
+from tkinter import ttk, messagebox, Menu, Label, Entry, StringVar 
+
+root = tk.Tk()
+root.geometry("")
 
 # Set to 0 to avoid messages 
 # 2 for warnings 
