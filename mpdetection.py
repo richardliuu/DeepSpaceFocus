@@ -380,8 +380,6 @@ prev_head_pos = None
 prev_light = None
 prev_gaze = None
 
-
-
 stream = p.open(format=FORMAT, 
                 channels=CHANNELS,
                 rate=RATE,
