@@ -23,20 +23,21 @@ os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
 import tensorflow as tf
 tf.get_logger().setLevel('ERROR')
 
-#  ======= TKINTER WINDOW STARTUP ============ 
-
-"""import tkinter as tk
-from tkinter import ttk, messagebox, Menu, Label, Entry, StringVar 
-
-root = tk.Tk()
-root.geometry("")"""
-
 # Set to 0 to avoid messages 
 # 2 for warnings 
 
 # Frame 
 update_interval = 10
 frame_count = 0
+
+# Audio parameters
+CHUNK = 1024 
+FORMAT = pyaudio.paInt16 
+CHANNELS = 1 
+RATE = 16000
+AUDIO_WINDOW = 5 # seconds of audio to analyze for patterns
+
+p = pyaudio.PyAudio()
 
 # Initialize MediaPipe solutions
 mp_face_mesh = mp.solutions.face_mesh
@@ -53,21 +54,30 @@ face_neutrality_values = []
 eye_gaze_values = []
 light_change_values = []
 task_engagement_values = []
+audio_level_values = []
+audio_pattern_values = []
 concentration_scores = []
 
 # Weights for concentration score calculation
-w1, w2, w3, w4, w5 = 0.2, 0.2, 0.2, 0.2, 0.2 
+w1, w2, w3, w4, w5, w6, w7 = 0.2, 0.15, 0.15, 0.15, 0.1, 0.125, 0.125
 
 # Reference values for normalization
 baseline_movement = 0
 baseline_samples = 0
 baseline_period = 5  # seconds to establish 
 
+# Reference values for audio processing
+audio_queue = queue.Queue()
+audio_level = 0.0 
+audio_pattern = 0.0
+audio_buffers = []
+stop_audio = False
+
 start_time = time.time()
 
 # Set up interactive plotting
 plt.ion() 
-fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(8, 6))
+fig, (ax1, ax2, ax3) = plt.subplots(3, 1, figsize=(8, 6))
 
 # Primary plot for individual metrics
 ax1.set_title("Individual Concentration Metrics")
@@ -86,6 +96,155 @@ ax2.set_xlabel("Time (seconds)")
 ax2.set_ylabel("Concentration Score")
 concentration_line, = ax2.plot([], [], 'k-', linewidth=2)
 ax2.set_ylim(0, 1)
+
+ax3.set_title("Audio Metrics")
+ax3.set_xlabel("Time (Seconds)")
+ax3.set_ylabel(("Metric Values"))
+audio_volume_line, = ax3.plot([], [], 'm-', label="Audio Environment")
+audio_pattern_line, = ax3.plot([], [], 'g-', label="Audio Pattern")
+ax3.legend(loc="upper right")
+
+def audio_callback(in_data, frame_count, time_info, status):
+    # Audio streaming through a call back function
+    audio_queue.put(in_data)
+    return (in_data, pyaudio.paContinue)
+
+def analyze_audio_patterns(audio_buffer, sample_rate):
+    """
+    Analyzing the audio for patterns that indicate concentration 
+    through returning a score between 0-1 (normalized)
+    """
+
+    if isinstance(audio_buffer, bytes):
+        samples = np.frombuffer(audio_buffer, dtype=np.int16)
+
+    else:
+        samples = audio_buffer
+    
+    # Normalizing
+    samples = samples.astype(np.float32) / 32768.0
+
+    # Audio Features
+    # Checking for high or sharp sounds
+    if len(samples) > 512:
+        spec_cent = librosa.feature.spectral_centroid(y=samples, sr=sample_rate)[0]
+        spec_cent_norm = np.mean(spec_cent) / 4000 # Normalizing
+        spec_score = 1 - min(1.0, spec_cent_norm)
+    else:
+        spec_score = 0.5 
+
+
+    # Checking for rhythm regularity through autocorrelation (measures relationship of variables with a lagged value)
+    if len(samples) > 1024:
+        corr = np.correlate(samples, samples, mode='full')
+        corr = corr[len(corr)//2:]
+
+        peaks, _ = find_peaks(corr, height=0.1*np.max(corr))
+
+        # Checking for the peaks of regular rhythm which should be even
+        if len(peaks) > 2:
+            peak_intervals = np.diff(peaks)
+            rhythm_regularity = 1 - np.std(peak_intervals) / np.mean(peak_intervals)
+            rhythm_score = max(0, min(1, rhythm_regularity))
+        else:
+            rhythm_score = 0.5
+    else:
+        rhythm_score = 0.5
+
+    # Third audio feature
+    # Sound consistency 
+    amplitude_envelope = np.abs(samples)
+    amp_std = np.std(amplitude_envelope)
+    consistency_score = 1 - min(1.0, amp_std * 10)
+
+    # Combining the scores
+    return 0.3 * spec_score + 0.3 * rhythm_score + 0.4 * consistency_score
+
+def process_audio():
+    # Processing audio in the background
+    global audio_level, audio_pattern, audio_buffers, stop_audio
+
+    # Debug statement
+    print("Audio processing thread started")
+
+    while not stop_audio:
+        try:
+            data = audio_queue.get(timeout=1)
+
+            # Clearing the audio queue processing 
+            if audio_queue.qsize() > 50:
+                print(f"Clearing audio backlog: {audio_queue.qsize()} items")
+                while audio_queue.qsize() > 5:
+                    audio_queue.get_nowait()
+                    audio_queue.task_done()
+
+            # Debug statement 
+            print(f"Got audio data: {len(data)} bytes, queue size: {audio_queue.qsize()}")
+
+            # Volume level
+            rms = audioop.rms(data, 2)
+            if rms > 0:
+                decibel = 20 * math.log10(rms)
+
+                # Debug statement
+                print(f"Raw RMS: {rms}, Decibel: {decibel}")
+
+                # Normalize for the 0-1 range (avg speech = 40-60db)
+                normalized_db = max(0, min(1.0, (decibel-10) / 40))
+
+            else:
+                normalized_db = 0
+
+            audio_level = normalized_db
+
+            # Storing audio data to allow for pattern analysis
+            audio_buffers.append(data)
+
+            max_buffers = int(RATE * AUDIO_WINDOW / CHUNK)
+
+            if len(audio_buffers) > max_buffers:
+                audio_buffers.pop(0)
+
+            if len(audio_buffers) > 5:
+                all_samples = np.frombuffer(b''.join(audio_buffers), dtype=np.int16)
+
+                audio_pattern = analyze_audio_patterns(all_samples, RATE)
+
+                # Classifying the audio environment through volume
+                if audio_level < 0.2:
+                    environment = "Quiet"
+                elif audio_level < 0.5:
+                    environment = "Moderate"
+                else:
+                    environment = "Noisy"
+
+                if audio_pattern > 0.7:
+                    pattern_type = "Consistent"
+                elif audio_pattern > 0.4:
+                    pattern_type = "Somewhat variable"
+                else:
+                    pattern_type = "Unstable"
+
+        except Exception as e:
+            print("Thread error:", e)
+            traceback.print_exc(file=sys.stdout)
+            
+            # Debug Statement 
+            print(f"Processed audio: level={audio_level:.2f}, pattern={audio_pattern:.2f}")
+
+            audio_queue.task_done()
+        except queue.Empty:
+            continue
+
+"""Low volume generally better for concentration while silence could also mean AFK"""
+def calculate_audio_concentration(audio_level, audio_pattern):
+    volume_score = 1.0 - audio_level if audio_level > 0.1 else 0.8 
+
+    # Consistent audio patterns are better for concentration
+    pattern_score = audio_pattern
+    
+    # Combine scores
+    return (volume_score * 0.4) + (pattern_score * 0.6)
 
 # Standard MediaPipe face mesh eye landmark indices
 # Left eye
@@ -221,6 +380,19 @@ prev_head_pos = None
 prev_light = None
 prev_gaze = None
 
+stream = p.open(format=FORMAT, 
+                channels=CHANNELS,
+                rate=RATE,
+                input=True,
+                frames_per_buffer=CHUNK,
+                stream_callback=audio_callback)
+
+audio_thread = threading.Thread(target=process_audio)
+audio_thread.daemon = True
+audio_thread.start()
+
+stream.start_stream() 
+
 # To reduce the computational power required
 plt.tight_layout()
 
@@ -249,12 +421,17 @@ while cap.isOpened():
         eye_stability, prev_gaze = calculate_eye_gaze_stability(face_landmarks, prev_gaze)
         task_engagement = calculate_task_engagement(face_landmarks, head_stability, eye_stability)
 
+        # Audio metrics
+        audio_concentration = calculate_audio_concentration(audio_level, audio_pattern)
+
         # Calculate overall concentration score
         concentration_score = (w1 * face_neutrality + 
                               w2 * head_stability + 
                               w3 * task_engagement + 
                               w4 * eye_stability + 
-                              w5 * light_stability)
+                              w5 * light_stability +
+                              w6 * (1 - audio_level) +
+                              w7 * audio_pattern)
 
         # Store data
         time_stamps.append(elapsed_time)
@@ -263,6 +440,8 @@ while cap.isOpened():
         eye_gaze_values.append(eye_stability)
         light_change_values.append(light_stability)
         task_engagement_values.append(task_engagement)
+        audio_level_values.append(1 - audio_level)
+        audio_pattern_values.append(audio_pattern)
         concentration_scores.append(concentration_score)
 
         # Draw face landmarks on the image
@@ -312,6 +491,11 @@ while cap.isOpened():
 
     # Need to graph both audio level and pattern
     # Could seperate the graphs to make it easier to see from the other metrics 
+
+            audio_volume_line.set_xdata(time_stamps)
+            audio_volume_line.set_ydata(audio_level_values)
+            audio_pattern_line.set_xdata(time_stamps)
+            audio_pattern_line.set_ydata(audio_pattern_values)
             
             concentration_line.set_xdata(time_stamps)
             concentration_line.set_ydata(concentration_scores)
@@ -319,7 +503,11 @@ while cap.isOpened():
             # Adjust plot limits
             ax1.set_xlim(0, max(10, elapsed_time))
             ax1.set_ylim(0, 1.1)
-              
+            
+            ax2.set_xlim(0, max(10, elapsed_time))
+            ax3.set_xlim(0, max(10, elapsed_time))
+            ax3.set_ylim(0, 1)
+            
             plt.draw()
             plt.pause(0.01)
 
