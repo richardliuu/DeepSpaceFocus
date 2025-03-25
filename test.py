@@ -45,10 +45,11 @@ head_stability_values = []
 face_neutrality_values = []
 eye_gaze_values = []
 light_change_values = []
+posture_values = []
 concentration_scores = []
 
 # Weights for concentration score calculation
-w1, w2, w3, w4 = 0.25, 0.25, 0.25, 0.25 
+w1, w2, w3, w4, w5 = 0.2, 0.2, 0.2, 0.2, 0.2 
 
 # Reference values for normalization
 baseline_movement = 0
@@ -69,6 +70,7 @@ head_line, = ax1.plot([], [], 'r-', label="Head Stability")
 face_line, = ax1.plot([], [], 'g-', label="Face Neutrality")
 eye_line, = ax1.plot([], [], 'b-', label="Eye Gaze Stability")
 light_line, = ax1.plot([], [], 'y-', label="Light Stability")
+posture_line, = ax1.plot([], [], 'p-', label="Posture Stability")
 ax1.legend(loc="upper right")
 
 # Secondary plot for overall concentration score
@@ -202,37 +204,36 @@ def calculate_angle(a, b, c):
     angle = np.abs(radians * 180.0 / np.pi)
     
     return angle if angle <= 180 else 360 - angle
-
 def analyze_upper_body_posture(landmarks):
     """
-    Analyze upper body posture focusing on head, neck, and shoulder alignment
+    Analyze upper body posture and return a stability score
     
     Args:
         landmarks (list): MediaPipe pose landmarks
     
     Returns:
-        dict: Upper body posture analysis results
+        float: Posture stability score (0-1 range)
     """
     # Key upper body landmarks
     nose = [
-        landmarks[mp.solutions.pose.PoseLandmarks.NOSE.value].x,
-        landmarks[mp.solutions.pose.PoseLandmarks.NOSE.value].y
+        landmarks[mp.solutions.pose.PoseLandmark.NOSE.value].x,
+        landmarks[mp.solutions.pose.PoseLandmark.NOSE.value].y
     ]
     left_shoulder = [
-        landmarks[mp.solutions.pose.PoseLandmarks.LEFT_SHOULDER.value].x,
-        landmarks[mp.solutions.pose.PoseLandmarks.LEFT_SHOULDER.value].y
+        landmarks[mp.solutions.pose.PoseLandmark.LEFT_SHOULDER.value].x,
+        landmarks[mp.solutions.pose.PoseLandmark.LEFT_SHOULDER.value].y
     ]
     right_shoulder = [
-        landmarks[mp.solutions.pose.PoseLandmarks.RIGHT_SHOULDER.value].x,
-        landmarks[mp.solutions.pose.PoseLandmarks.RIGHT_SHOULDER.value].y
+        landmarks[mp.solutions.pose.PoseLandmark.RIGHT_SHOULDER.value].x,
+        landmarks[mp.solutions.pose.PoseLandmark.RIGHT_SHOULDER.value].y
     ]
     left_ear = [
-        landmarks[mp.solutions.pose.PoseLandmarks.LEFT_EAR.value].x,
-        landmarks[mp.solutions.pose.PoseLandmarks.LEFT_EAR.value].y
+        landmarks[mp.solutions.pose.PoseLandmark.LEFT_EAR.value].x,
+        landmarks[mp.solutions.pose.PoseLandmark.LEFT_EAR.value].y
     ]
     right_ear = [
-        landmarks[mp.solutions.pose.PoseLandmarks.RIGHT_EAR.value].x,
-        landmarks[mp.solutions.pose.PoseLandmarks.RIGHT_EAR.value].y
+        landmarks[mp.solutions.pose.PoseLandmark.RIGHT_EAR.value].x,
+        landmarks[mp.solutions.pose.PoseLandmark.RIGHT_EAR.value].y
     ]
     
     # Calculate shoulder alignment and head tilt
@@ -244,20 +245,26 @@ def analyze_upper_body_posture(landmarks):
     
     head_tilt = calculate_angle(left_ear, nose, right_ear)
     
-    # Posture analysis
-    posture_status = {
-        'shoulder_alignment': shoulder_alignment,
-        'head_tilt': head_tilt,
-        'is_aligned': (
-            85 <= shoulder_alignment <= 95 and 
-            85 <= head_tilt <= 95
-        ),
-        'tilting_left': head_tilt < 85,
-        'tilting_right': head_tilt > 95,
-        'shoulders_rotated': abs(shoulder_alignment - 90) > 10
-    }
+    # Define ideal ranges for shoulder alignment and head tilt
+    ideal_shoulder_range = (85, 95)
+    ideal_head_tilt_range = (85, 95)
     
-    return posture_status
+    # Calculate deviation from ideal posture
+    shoulder_deviation = abs(shoulder_alignment - 90)
+    head_tilt_deviation = abs(head_tilt - 90)
+    
+    # Maximum acceptable deviation before stability is significantly impacted
+    max_shoulder_deviation = 15
+    max_head_tilt_deviation = 15
+    
+    # Calculate stability scores for shoulders and head tilt
+    shoulder_stability = max(0, 1 - (shoulder_deviation / max_shoulder_deviation))
+    head_tilt_stability = max(0, 1 - (head_tilt_deviation / max_head_tilt_deviation))
+    
+    # Combined posture stability (average of shoulder and head tilt stability)
+    posture_stability = (shoulder_stability + head_tilt_stability) / 2
+    
+    return posture_stability
 
 def visualize_upper_body_posture(frame, results):
     """
@@ -375,12 +382,14 @@ while cap.isOpened():
         head_stability, prev_head_pos = calculate_head_stability(pose_landmarks, prev_head_pos)
         light_stability, prev_light = calculate_light_changes(frame, prev_light)
         eye_stability, prev_gaze = calculate_eye_gaze_stability(face_landmarks, prev_gaze)
+        posture_stability = analyze_upper_body_posture(pose_landmarks.landmark)
 
         # Calculate overall concentration score
         concentration_score = (w1 * face_neutrality + 
                               w2 * head_stability +  
                               w3 * eye_stability + 
-                              w4 * light_stability)
+                              w4 * light_stability +
+                              w5 * posture_stability)
 
         # Store data
         time_stamps.append(elapsed_time)
@@ -388,6 +397,7 @@ while cap.isOpened():
         face_neutrality_values.append(face_neutrality)
         eye_gaze_values.append(eye_stability)
         light_change_values.append(light_stability)
+        posture_values.append(posture_stability)
         concentration_scores.append(concentration_score)
 
         # Draw face landmarks on the image
@@ -432,9 +442,9 @@ while cap.isOpened():
             light_line.set_xdata(time_stamps)
             light_line.set_ydata(light_change_values)
 
-    # Need to graph both audio level and pattern
-    # Could seperate the graphs to make it easier to see from the other metrics 
-            
+            posture_line.set_xdata(time_stamps)
+            posture_line.set_ydata(posture_values)
+
             concentration_line.set_xdata(time_stamps)
             concentration_line.set_ydata(concentration_scores)
             
