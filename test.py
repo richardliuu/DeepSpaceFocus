@@ -209,6 +209,167 @@ def calculate_task_engagement(face_landmarks, head_stability, eye_stability):
     
     return max(0.3, min(1.0, engagement))
 
+def calculate_angle(a, b, c):
+    """
+    Calculate angle between three points
+    
+    Args:
+        a, b, c (list or numpy array): Landmark coordinates [x, y]
+    
+    Returns:
+        float: Angle in degrees
+    """
+    a = np.array(a)
+    b = np.array(b)
+    c = np.array(c)
+    
+    radians = np.arctan2(c[1]-b[1], c[0]-b[0]) - np.arctan2(a[1]-b[1], a[0]-b[0])
+    angle = np.abs(radians * 180.0 / np.pi)
+    
+    return angle if angle <= 180 else 360 - angle
+
+def analyze_upper_body_posture(landmarks):
+    """
+    Analyze upper body posture focusing on head, neck, and shoulder alignment
+    
+    Args:
+        landmarks (list): MediaPipe pose landmarks
+    
+    Returns:
+        dict: Upper body posture analysis results
+    """
+    # Key upper body landmarks
+    nose = [
+        landmarks[mp.solutions.pose.PoseLandmarks.NOSE.value].x,
+        landmarks[mp.solutions.pose.PoseLandmarks.NOSE.value].y
+    ]
+    left_shoulder = [
+        landmarks[mp.solutions.pose.PoseLandmarks.LEFT_SHOULDER.value].x,
+        landmarks[mp.solutions.pose.PoseLandmarks.LEFT_SHOULDER.value].y
+    ]
+    right_shoulder = [
+        landmarks[mp.solutions.pose.PoseLandmarks.RIGHT_SHOULDER.value].x,
+        landmarks[mp.solutions.pose.PoseLandmarks.RIGHT_SHOULDER.value].y
+    ]
+    left_ear = [
+        landmarks[mp.solutions.pose.PoseLandmarks.LEFT_EAR.value].x,
+        landmarks[mp.solutions.pose.PoseLandmarks.LEFT_EAR.value].y
+    ]
+    right_ear = [
+        landmarks[mp.solutions.pose.PoseLandmarks.RIGHT_EAR.value].x,
+        landmarks[mp.solutions.pose.PoseLandmarks.RIGHT_EAR.value].y
+    ]
+    
+    # Calculate shoulder alignment and head tilt
+    shoulder_alignment = calculate_angle(
+        [nose[0], left_shoulder[1]], 
+        [(left_shoulder[0] + right_shoulder[0])/2, (left_shoulder[1] + right_shoulder[1])/2], 
+        [nose[0], right_shoulder[1]]
+    )
+    
+    head_tilt = calculate_angle(left_ear, nose, right_ear)
+    
+    # Posture analysis
+    posture_status = {
+        'shoulder_alignment': shoulder_alignment,
+        'head_tilt': head_tilt,
+        'is_aligned': (
+            85 <= shoulder_alignment <= 95 and 
+            85 <= head_tilt <= 95
+        ),
+        'tilting_left': head_tilt < 85,
+        'tilting_right': head_tilt > 95,
+        'shoulders_rotated': abs(shoulder_alignment - 90) > 10
+    }
+    
+    return posture_status
+
+def visualize_upper_body_posture(frame, results):
+    """
+    Visualize upper body posture landmarks and analysis
+    
+    Args:
+        frame (numpy.ndarray): Input video frame
+        results (mediapipe.solutions.pose.PoseResults): MediaPipe pose detection results
+    
+    Returns:
+        numpy.ndarray: Frame with upper body posture visualization
+    """
+    # Initialize MediaPipe drawing utilities
+    mp_drawing = mp.solutions.drawing_utils
+    mp_pose = mp.solutions.pose
+
+    # Check if landmarks are detected
+    if results.pose_landmarks:
+        # Draw all upper body landmarks with specific colors and sizes
+        landmark_drawing_spec = [
+            (mp_pose.PoseLandmarks.NOSE, (0, 255, 0), 7),  # Green for nose
+            (mp_pose.PoseLandmarks.LEFT_SHOULDER, (255, 0, 0), 10),  # Blue for left shoulder
+            (mp_pose.PoseLandmarks.RIGHT_SHOULDER, (0, 0, 255), 10),  # Red for right shoulder
+            (mp_pose.PoseLandmarks.LEFT_EAR, (255, 255, 0), 5),  # Yellow for left ear
+            (mp_pose.PoseLandmarks.RIGHT_EAR, (255, 255, 0), 5)  # Yellow for right ear
+        ]
+        
+        for landmark_type, color, radius in landmark_drawing_spec:
+            landmark = results.pose_landmarks.landmark[landmark_type]
+            landmark_point = (
+                int(landmark.x * frame.shape[1]), 
+                int(landmark.y * frame.shape[0])
+            )
+            
+            # Draw colored circle for each landmark
+            cv2.circle(frame, landmark_point, radius, color, -1)
+        
+        # Draw line connecting shoulders
+        left_shoulder = results.pose_landmarks.landmark[mp_pose.PoseLandmarks.LEFT_SHOULDER]
+        right_shoulder = results.pose_landmarks.landmark[mp_pose.PoseLandmarks.RIGHT_SHOULDER]
+        
+        left_shoulder_point = (
+            int(left_shoulder.x * frame.shape[1]), 
+            int(left_shoulder.y * frame.shape[0])
+        )
+        right_shoulder_point = (
+            int(right_shoulder.x * frame.shape[1]), 
+            int(right_shoulder.y * frame.shape[0])
+        )
+        
+        # Draw shoulder line
+        cv2.line(frame, left_shoulder_point, right_shoulder_point, (0, 255, 255), 3)
+        
+        # Analyze posture
+        posture_analysis = analyze_upper_body_posture(results.pose_landmarks.landmark)
+        
+        # Prepare text for display
+        posture_status = (
+            "Aligned" if posture_analysis['is_aligned'] else 
+            "Tilting Left" if posture_analysis['tilting_left'] else 
+            "Tilting Right" if posture_analysis['tilting_right'] else 
+            "Rotated Shoulders" if posture_analysis['shoulders_rotated'] else 
+            "Misaligned"
+        )
+        
+        # Display posture status and shoulder alignment angle
+        cv2.putText(
+            frame, 
+            f"Posture: {posture_status}", 
+            (10, 30), 
+            cv2.FONT_HERSHEY_SIMPLEX, 
+            0.7, 
+            (255, 255, 255), 
+            2
+        )
+        cv2.putText(
+            frame, 
+            f"Shoulder Alignment: {posture_analysis['shoulder_alignment']:.2f}°", 
+            (10, 60), 
+            cv2.FONT_HERSHEY_SIMPLEX, 
+            0.7, 
+            (255, 255, 255), 
+            2
+        )
+    
+    return frame
+
 # Variables to store previous values
 prev_head_pos = None
 prev_light = None

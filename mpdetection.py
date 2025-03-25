@@ -15,13 +15,7 @@ import os
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
 tf.get_logger().setLevel('ERROR')
 
-#  ======= TKINTER WINDOW STARTUP ============ 
-
-import tkinter as tk
-from tkinter import ttk, messagebox, Menu, Label, Entry, StringVar 
-
-root = tk.Tk()
-root.geometry("")
+run_monitoring = False
 
 # Set to 0 to avoid messages 
 # 2 for warnings 
@@ -44,6 +38,7 @@ eye_gaze_values = []
 light_change_values = []
 task_engagement_values = []
 concentration_scores = []
+latest_frame = None
 
 # Weights for concentration score calculation
 w1, w2, w3, w4, w5 = 0.2, 0.2, 0.2, 0.2, 0.2 
@@ -54,28 +49,6 @@ baseline_samples = 0
 baseline_period = 5  # seconds to establish 
 
 start_time = time.time()
-
-# Set up interactive plotting
-plt.ion() 
-fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(8, 6))
-
-# Primary plot for individual metrics
-ax1.set_title("Individual Concentration Metrics")
-ax1.set_xlabel("Time (seconds)")
-ax1.set_ylabel("Metric Value")
-head_line, = ax1.plot([], [], 'r-', label="Head Stability")
-face_line, = ax1.plot([], [], 'g-', label="Face Neutrality")
-eye_line, = ax1.plot([], [], 'b-', label="Eye Gaze Stability")
-task_line, = ax1.plot([], [], 'c-', label="Task Engagement")
-light_line, = ax1.plot([], [], 'y-', label="Light Stability")
-ax1.legend(loc="upper right")
-
-# Secondary plot for overall concentration score
-ax2.set_title("Overall Concentration Score")
-ax2.set_xlabel("Time (seconds)")
-ax2.set_ylabel("Concentration Score")
-concentration_line, = ax2.plot([], [], 'k-', linewidth=2)
-ax2.set_ylim(0, 1)
 
 # Standard MediaPipe face mesh eye landmark indices
 # Left eye
@@ -211,11 +184,33 @@ prev_head_pos = None
 prev_light = None
 prev_gaze = None
 
+# Set up interactive plotting
+plt.ion() 
+fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(8, 6))
+
+# Primary plot for individual metrics
+ax1.set_title("Individual Concentration Metrics")
+ax1.set_xlabel("Time (seconds)")
+ax1.set_ylabel("Metric Value")
+head_line, = ax1.plot([], [], 'r-', label="Head Stability")
+face_line, = ax1.plot([], [], 'g-', label="Face Neutrality")
+eye_line, = ax1.plot([], [], 'b-', label="Eye Gaze Stability")
+task_line, = ax1.plot([], [], 'c-', label="Task Engagement")
+light_line, = ax1.plot([], [], 'y-', label="Light Stability")
+ax1.legend(loc="upper right")
+
+# Secondary plot for overall concentration score
+ax2.set_title("Overall Concentration Score")
+ax2.set_xlabel("Time (seconds)")
+ax2.set_ylabel("Concentration Score")
+concentration_line, = ax2.plot([], [], 'k-', linewidth=2)
+ax2.set_ylim(0, 1)
+
 # To reduce the computational power required
 plt.tight_layout()
 
 def run_concentration_monitor():
-    global run_monitoring, frame_count, prev_head_pos, prev_light, prev_gaze
+    global run_monitoring, latest_frame, prev_head_pos, prev_light, prev_gaze
     run_monitoring = True
     cap = cv2.VideoCapture(0)
     while cap.isOpened() and run_monitoring:
@@ -223,34 +218,28 @@ def run_concentration_monitor():
         if not ret:
             break
 
-        frame_count += 1
-
-        # Convert to RGB for MediaPipe
+        # Process frame in RGB for MediaPipe
         rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
         face_results = face_mesh.process(rgb_frame)
         pose_results = pose.process(rgb_frame)
-
         elapsed_time = time.time() - start_time
 
+        # If both face and pose data are available, compute metrics and draw indicators
         if face_results.multi_face_landmarks and pose_results.pose_landmarks:
             face_landmarks = face_results.multi_face_landmarks[0]
             pose_landmarks = pose_results.pose_landmarks
 
-            # Calculate all metrics
+            # Calculate metrics
             face_neutrality = calculate_face_neutrality(face_landmarks)
             head_stability, prev_head_pos = calculate_head_stability(pose_landmarks, prev_head_pos)
             light_stability, prev_light = calculate_light_changes(frame, prev_light)
             eye_stability, prev_gaze = calculate_eye_gaze_stability(face_landmarks, prev_gaze)
             task_engagement = calculate_task_engagement(face_landmarks, head_stability, eye_stability)
+            concentration_score = (w1 * face_neutrality + w2 * head_stability +
+                                   w3 * task_engagement + w4 * eye_stability +
+                                   w5 * light_stability)
 
-            # Calculate overall concentration score
-            concentration_score = (w1 * face_neutrality + 
-                                w2 * head_stability + 
-                                w3 * task_engagement + 
-                                w4 * eye_stability + 
-                                w5 * light_stability)
-
-            # Store data
+            # Append data to global lists
             time_stamps.append(elapsed_time)
             head_stability_values.append(head_stability)
             face_neutrality_values.append(face_neutrality)
@@ -258,77 +247,72 @@ def run_concentration_monitor():
             light_change_values.append(light_stability)
             task_engagement_values.append(task_engagement)
             concentration_scores.append(concentration_score)
-
-            # Draw face landmarks on the image
+            
+            # Draw face indicators on the frame
             # Marking Forehead and Chin
             forehead = face_landmarks.landmark[10]
             chin = face_landmarks.landmark[152]
-
-            forehead_x, forehead_y = int(forehead.x * frame.shape[1]), int(forehead.y * frame.shape[0])
-            chin_x, chin_y = int(chin.x * frame.shape[1]), int(chin.y * frame.shape[0])
-            
-            # Mark eyes using standard face mesh indices
-            left_eye = face_landmarks.landmark[LEFT_IRIS_CENTER_APPROX]
-            right_eye = face_landmarks.landmark[RIGHT_IRIS_CENTER_APPROX]
-            
-            left_eye_x, left_eye_y = int(left_eye.x * frame.shape[1]), int(left_eye.y * frame.shape[0])
-            right_eye_x, right_eye_y = int(right_eye.x * frame.shape[1]), int(right_eye.y * frame.shape[0])
-            
-            # Draw landmarks
+            forehead_x = int(forehead.x * frame.shape[1])
+            forehead_y = int(forehead.y * frame.shape[0])
+            chin_x = int(chin.x * frame.shape[1])
+            chin_y = int(chin.y * frame.shape[0])
             cv2.circle(frame, (forehead_x, forehead_y), 5, (0, 255, 0), -1)
             cv2.circle(frame, (chin_x, chin_y), 5, (0, 0, 255), -1)
             cv2.line(frame, (forehead_x, forehead_y), (chin_x, chin_y), (255, 255, 0), 2)
             
-            # Draw eye markers
+            # Mark eyes
+            left_eye = face_landmarks.landmark[LEFT_IRIS_CENTER_APPROX]
+            right_eye = face_landmarks.landmark[RIGHT_IRIS_CENTER_APPROX]
+            left_eye_x = int(left_eye.x * frame.shape[1])
+            left_eye_y = int(left_eye.y * frame.shape[0])
+            right_eye_x = int(right_eye.x * frame.shape[1])
+            right_eye_y = int(right_eye.y * frame.shape[0])
             cv2.circle(frame, (left_eye_x, left_eye_y), 5, (255, 0, 255), -1)
             cv2.circle(frame, (right_eye_x, right_eye_y), 5, (255, 0, 255), -1)
             
-            # Add text with metrics
+            # Add text with concentration score
             cv2.putText(frame, f"Concentration: {concentration_score:.2f}", (10, 30), 
                         cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
-
-            # Update plots
-            if frame_count >= update_interval:
-                head_line.set_xdata(time_stamps)
-                head_line.set_ydata(head_stability_values)
-                
-                face_line.set_xdata(time_stamps)
-                face_line.set_ydata(face_neutrality_values)
-                
-                eye_line.set_xdata(time_stamps)
-                eye_line.set_ydata(eye_gaze_values)
-                
-                task_line.set_xdata(time_stamps)
-                task_line.set_ydata(task_engagement_values)
-                
-                light_line.set_xdata(time_stamps)
-                light_line.set_ydata(light_change_values)
-
-        # Need to graph both audio level and pattern
-        # Could seperate the graphs to make it easier to see from the other metrics 
-                
-                concentration_line.set_xdata(time_stamps)
-                concentration_line.set_ydata(concentration_scores)
-                
-                # Adjust plot limits
-                ax1.set_xlim(0, max(10, elapsed_time))
-                ax1.set_ylim(0, 1.1)
-                
-                plt.draw()
-                plt.pause(0.01)
-
-                # Resetting the frame counter 
-                frame_count = 0 
-
-        # Display the frame
-        cv2.imshow("Concentration Monitoring", frame)
-
-        if cv2.waitKey(1) & 0xFF == ord('q'):
-            run_monitoring = False
-            break
-
-
+        
+        # Update the global frame for display in the main thread
+        latest_frame = frame.copy()
+        time.sleep(0.1)
+        
     cap.release()
+
+def update_plots():
+    # Update plots if new data is available
+    if time_stamps:
+        head_line.set_xdata(time_stamps)
+        head_line.set_ydata(head_stability_values)
+        face_line.set_xdata(time_stamps)
+        face_line.set_ydata(face_neutrality_values)
+        eye_line.set_xdata(time_stamps)
+        eye_line.set_ydata(eye_gaze_values)
+        task_line.set_xdata(time_stamps)
+        task_line.set_ydata(task_engagement_values)
+        light_line.set_xdata(time_stamps)
+        light_line.set_ydata(light_change_values)
+        concentration_line.set_xdata(time_stamps)
+        concentration_line.set_ydata(concentration_scores)
+        
+        # Adjust axes limits
+        ax1.set_xlim(0, max(10, time_stamps[-1]))
+        ax1.set_ylim(0, 1.1)
+        ax2.set_xlim(0, max(10, time_stamps[-1]))
+        
+        fig.canvas.draw_idle()
+    
+    # If a new video frame is available, display it in an OpenCV window
+    if latest_frame is not None:
+        cv2.imshow("Concentration Monitoring", latest_frame)
+        # Check if user pressed 'q' in the OpenCV window
+        if cv2.waitKey(1) & 0xFF == ord('q'):
+            stop_monitoring()
+
+    # Schedule next update after 100 ms
+    r.after(100, update_plots)
+
     cv2.destroyAllWindows()
     plt.ioff()
     plt.show()
@@ -365,12 +349,15 @@ home_page.grid(row=0, column=0, sticky="nsew")
 
 # Home Functions
 def start_monitoring():
-    monitoring_thread = threading.Thread(target=run_concentration_monitor, daemon=True)
-    monitoring_thread.start()
+    global monitor_threading
+    if not run_monitoring:
+        monitoring_thread = threading.Thread(target=run_concentration_monitor, daemon=True)
+        monitoring_thread.start()
 
 def stop_monitoring():
     global run_monitoring  
     run_monitoring = False
+    cv2.destroyAllWindows()
 
 # Home page widgets using grid
 home_title = Label(home_page, text="Welcome to DeepSpaceFocus", font=("Arial", 16, "bold"))
@@ -529,5 +516,5 @@ for frame in frames.values():
 # Show home page initially
 show_frame(frames["home"])
 
-root.mainloop()
-
+r.after(100, update_plots)
+r.mainloop()
