@@ -3,33 +3,25 @@ import mediapipe as mp
 import matplotlib.pyplot as plt
 import numpy as np
 import time
-import pyaudio
-import audioop
-import threading 
-import queue
-import math
-import librosa
-import scipy.stats
+import threading
 
 # Debug imports
 import traceback
 import sys 
 
 from scipy.signal import find_peaks
-
+import tensorflow as tf
 import os 
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
-
-import tensorflow as tf
 tf.get_logger().setLevel('ERROR')
 
 #  ======= TKINTER WINDOW STARTUP ============ 
 
-"""import tkinter as tk
+import tkinter as tk
 from tkinter import ttk, messagebox, Menu, Label, Entry, StringVar 
 
 root = tk.Tk()
-root.geometry("")"""
+root.geometry("")
 
 # Set to 0 to avoid messages 
 # 2 for warnings 
@@ -43,8 +35,6 @@ mp_face_mesh = mp.solutions.face_mesh
 face_mesh = mp_face_mesh.FaceMesh(min_detection_confidence=0.5, min_tracking_confidence=0.5)
 mp_pose = mp.solutions.pose
 pose = mp_pose.Pose()
-
-cap = cv2.VideoCapture(0)
 
 # Lists to store metrics data
 time_stamps = []
@@ -224,115 +214,320 @@ prev_gaze = None
 # To reduce the computational power required
 plt.tight_layout()
 
-while cap.isOpened():
-    ret, frame = cap.read()
-    if not ret:
-        break
+def run_concentration_monitor():
+    global run_monitoring, frame_count, prev_head_pos, prev_light, prev_gaze
+    run_monitoring = True
+    cap = cv2.VideoCapture(0)
+    while cap.isOpened() and run_monitoring:
+        ret, frame = cap.read()
+        if not ret:
+            break
 
-    frame_count += 1
+        frame_count += 1
 
-    # Convert to RGB for MediaPipe
-    rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-    face_results = face_mesh.process(rgb_frame)
-    pose_results = pose.process(rgb_frame)
+        # Convert to RGB for MediaPipe
+        rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        face_results = face_mesh.process(rgb_frame)
+        pose_results = pose.process(rgb_frame)
 
-    elapsed_time = time.time() - start_time
+        elapsed_time = time.time() - start_time
 
-    if face_results.multi_face_landmarks and pose_results.pose_landmarks:
-        face_landmarks = face_results.multi_face_landmarks[0]
-        pose_landmarks = pose_results.pose_landmarks
+        if face_results.multi_face_landmarks and pose_results.pose_landmarks:
+            face_landmarks = face_results.multi_face_landmarks[0]
+            pose_landmarks = pose_results.pose_landmarks
 
-        # Calculate all metrics
-        face_neutrality = calculate_face_neutrality(face_landmarks)
-        head_stability, prev_head_pos = calculate_head_stability(pose_landmarks, prev_head_pos)
-        light_stability, prev_light = calculate_light_changes(frame, prev_light)
-        eye_stability, prev_gaze = calculate_eye_gaze_stability(face_landmarks, prev_gaze)
-        task_engagement = calculate_task_engagement(face_landmarks, head_stability, eye_stability)
+            # Calculate all metrics
+            face_neutrality = calculate_face_neutrality(face_landmarks)
+            head_stability, prev_head_pos = calculate_head_stability(pose_landmarks, prev_head_pos)
+            light_stability, prev_light = calculate_light_changes(frame, prev_light)
+            eye_stability, prev_gaze = calculate_eye_gaze_stability(face_landmarks, prev_gaze)
+            task_engagement = calculate_task_engagement(face_landmarks, head_stability, eye_stability)
 
-        # Calculate overall concentration score
-        concentration_score = (w1 * face_neutrality + 
-                              w2 * head_stability + 
-                              w3 * task_engagement + 
-                              w4 * eye_stability + 
-                              w5 * light_stability)
+            # Calculate overall concentration score
+            concentration_score = (w1 * face_neutrality + 
+                                w2 * head_stability + 
+                                w3 * task_engagement + 
+                                w4 * eye_stability + 
+                                w5 * light_stability)
 
-        # Store data
-        time_stamps.append(elapsed_time)
-        head_stability_values.append(head_stability)
-        face_neutrality_values.append(face_neutrality)
-        eye_gaze_values.append(eye_stability)
-        light_change_values.append(light_stability)
-        task_engagement_values.append(task_engagement)
-        concentration_scores.append(concentration_score)
+            # Store data
+            time_stamps.append(elapsed_time)
+            head_stability_values.append(head_stability)
+            face_neutrality_values.append(face_neutrality)
+            eye_gaze_values.append(eye_stability)
+            light_change_values.append(light_stability)
+            task_engagement_values.append(task_engagement)
+            concentration_scores.append(concentration_score)
 
-        # Draw face landmarks on the image
-        # Marking Forehead and Chin
-        forehead = face_landmarks.landmark[10]
-        chin = face_landmarks.landmark[152]
+            # Draw face landmarks on the image
+            # Marking Forehead and Chin
+            forehead = face_landmarks.landmark[10]
+            chin = face_landmarks.landmark[152]
 
-        forehead_x, forehead_y = int(forehead.x * frame.shape[1]), int(forehead.y * frame.shape[0])
-        chin_x, chin_y = int(chin.x * frame.shape[1]), int(chin.y * frame.shape[0])
+            forehead_x, forehead_y = int(forehead.x * frame.shape[1]), int(forehead.y * frame.shape[0])
+            chin_x, chin_y = int(chin.x * frame.shape[1]), int(chin.y * frame.shape[0])
+            
+            # Mark eyes using standard face mesh indices
+            left_eye = face_landmarks.landmark[LEFT_IRIS_CENTER_APPROX]
+            right_eye = face_landmarks.landmark[RIGHT_IRIS_CENTER_APPROX]
+            
+            left_eye_x, left_eye_y = int(left_eye.x * frame.shape[1]), int(left_eye.y * frame.shape[0])
+            right_eye_x, right_eye_y = int(right_eye.x * frame.shape[1]), int(right_eye.y * frame.shape[0])
+            
+            # Draw landmarks
+            cv2.circle(frame, (forehead_x, forehead_y), 5, (0, 255, 0), -1)
+            cv2.circle(frame, (chin_x, chin_y), 5, (0, 0, 255), -1)
+            cv2.line(frame, (forehead_x, forehead_y), (chin_x, chin_y), (255, 255, 0), 2)
+            
+            # Draw eye markers
+            cv2.circle(frame, (left_eye_x, left_eye_y), 5, (255, 0, 255), -1)
+            cv2.circle(frame, (right_eye_x, right_eye_y), 5, (255, 0, 255), -1)
+            
+            # Add text with metrics
+            cv2.putText(frame, f"Concentration: {concentration_score:.2f}", (10, 30), 
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
+
+            # Update plots
+            if frame_count >= update_interval:
+                head_line.set_xdata(time_stamps)
+                head_line.set_ydata(head_stability_values)
+                
+                face_line.set_xdata(time_stamps)
+                face_line.set_ydata(face_neutrality_values)
+                
+                eye_line.set_xdata(time_stamps)
+                eye_line.set_ydata(eye_gaze_values)
+                
+                task_line.set_xdata(time_stamps)
+                task_line.set_ydata(task_engagement_values)
+                
+                light_line.set_xdata(time_stamps)
+                light_line.set_ydata(light_change_values)
+
+        # Need to graph both audio level and pattern
+        # Could seperate the graphs to make it easier to see from the other metrics 
+                
+                concentration_line.set_xdata(time_stamps)
+                concentration_line.set_ydata(concentration_scores)
+                
+                # Adjust plot limits
+                ax1.set_xlim(0, max(10, elapsed_time))
+                ax1.set_ylim(0, 1.1)
+                
+                plt.draw()
+                plt.pause(0.01)
+
+                # Resetting the frame counter 
+                frame_count = 0 
+
+        # Display the frame
+        cv2.imshow("Concentration Monitoring", frame)
+
+        if cv2.waitKey(1) & 0xFF == ord('q'):
+            run_monitoring = False
+            break
+
+
+    cap.release()
+    cv2.destroyAllWindows()
+    plt.ioff()
+    plt.show()
+
+# ============= TKINTER WINDOW =============
+import tkinter as tk
+from tkinter import Menu, Label, Entry, StringVar
+from tkinter import ttk, messagebox
+
+# Tkinter Window Setup
+r = tk.Tk()
+r.geometry("600x500")
+r.title("DeepSpaceFocus")
+
+# Create main container
+container = tk.Frame(r)
+container.pack(fill="both", expand=True)
+
+# Dictionary to store frames
+frames = {}
+
+# Menu Bar Config
+menu = Menu(r)
+r.config(menu=menu)
+
+# Function to switch frames
+def show_frame(frame):
+    frame.tkraise()
+
+# HOME PAGE 
+home_page = tk.Frame(container)
+frames["home"] = home_page
+home_page.grid(row=0, column=0, sticky="nsew")
+
+# Home Functions
+def start_monitoring():
+    monitoring_thread = threading.Thread(target=run_concentration_monitor, daemon=True)
+    monitoring_thread.start()
+
+def stop_monitoring():
+    global run_monitoring  
+    run_monitoring = False
+
+# Home page widgets using grid
+home_title = Label(home_page, text="Welcome to DeepSpaceFocus", font=("Arial", 16, "bold"))
+home_title.grid(row=0, column=0, padx=20, pady=20, columnspan=3)
+
+home_info = Label(home_page, text="Your productivity assistant")
+home_info.grid(row=1, column=0, padx=20, pady=10, columnspan=3)
+
+# Additional home content can be added here
+home_description = Label(home_page, text="Use the menu above to navigate between features")
+home_description.grid(row=2, column=0, padx=20, pady=30, columnspan=3)
+
+monitor_start_button = ttk.Button(home_page, text="Start Monitoring", command=start_monitoring)
+monitor_start_button.grid(row=3, column=0, padx=20, pady=10)
+
+monitor_stop_button = ttk.Button(home_page, text="Stop Monitoring", command=stop_monitoring)
+monitor_stop_button.grid(row=3, column=1, padx=20, pady=10)
+
+# TIMER PAGE 
+timer_page = tk.Frame(container)
+frames["timer"] = timer_page
+timer_page.grid(row=0, column=0, sticky="nsew")
+
+# Timer page title
+timer_title = Label(timer_page, text="Break Timer", font=("Arial", 14, "bold"))
+timer_title.grid(row=0, column=0, padx=20, pady=20, columnspan=3)
+
+# Time unit selection
+time_unit_label = Label(timer_page, text="Select time unit:")
+time_unit_label.grid(row=1, column=0, padx=10, pady=10, sticky="e")
+
+time_unit_var = StringVar()
+combo_box = ttk.Combobox(timer_page, textvariable=time_unit_var, 
+                         values=["Minutes", "Seconds", "Hours"])
+combo_box.grid(row=1, column=1, padx=10, pady=10, sticky="w")
+combo_box.set("Minutes")
+
+selected_unit_label = Label(timer_page, text="")
+selected_unit_label.grid(row=1, column=2, padx=10, pady=10, sticky="w")
+
+# Time value entry
+time_value_label = Label(timer_page, text="Enter time value:")
+time_value_label.grid(row=2, column=0, padx=10, pady=10, sticky="e")
+
+time_entry = Entry(timer_page)
+time_entry.grid(row=2, column=1, padx=10, pady=10, sticky="w")
+
+# Function to update the selected time unit label
+def select_time(event):
+    selected_time = time_unit_var.get()
+    selected_unit_label.config(text="Selected: " + selected_time)
+
+combo_box.bind("<<ComboboxSelected>>", select_time)
+
+def start_timer():
+    try: 
+        time_value = float(time_entry.get())
+
+        time_unit = time_unit_var.get()
+        # Fixed the variable name here (was using time_unit_var instead of time_unit)
+        if time_unit == "Minutes":
+            seconds = time_value * 60
+        elif time_unit == "Hours":
+            seconds = time_value * 3600
+        else:
+            seconds = time_value
+
+        timer_window = tk.Toplevel()
+        timer_window.title("Timer")
+        timer_window.geometry("400x150")
+
+        countdown_label = Label(timer_window, text="Time Remaining:", font=("Arial", 12))
+        countdown_label.pack(pady=10)  # Reduced padding
+
+        time_left_label = Label(timer_window, text="", font=("Arial", 24))  # Added font size
+        time_left_label.pack(pady=10)
+
+        stop_button = tk.Button(timer_window, text="Stop Timer", bg="#F44336", fg="white", 
+                               command=timer_window.destroy)
+        stop_button.pack(pady=10)
+
+        def update_countdown(remaining):
+            if remaining <= 0:
+                time_left_label.config(text="Time's up!")
+                # Fixed missing message parameter
+                messagebox.showinfo("Break Timer", "Your break time is over!")
+                timer_window.destroy()
+                return
+            
+            mins, secs = divmod(int(remaining), 60)
+            hours, mins = divmod(mins, 60)
+
+            if hours > 0:
+                time_left_label.config(text=f"{hours:02d}:{mins:02d}:{secs:02d}")
+            else:
+                time_left_label.config(text=f"{mins:02d}:{secs:02d}")
+
+            timer_window.after(1000, update_countdown, remaining - 1)
         
-        # Mark eyes using standard face mesh indices
-        left_eye = face_landmarks.landmark[LEFT_IRIS_CENTER_APPROX]
-        right_eye = face_landmarks.landmark[RIGHT_IRIS_CENTER_APPROX]
-        
-        left_eye_x, left_eye_y = int(left_eye.x * frame.shape[1]), int(left_eye.y * frame.shape[0])
-        right_eye_x, right_eye_y = int(right_eye.x * frame.shape[1]), int(right_eye.y * frame.shape[0])
-        
-        # Draw landmarks
-        cv2.circle(frame, (forehead_x, forehead_y), 5, (0, 255, 0), -1)
-        cv2.circle(frame, (chin_x, chin_y), 5, (0, 0, 255), -1)
-        cv2.line(frame, (forehead_x, forehead_y), (chin_x, chin_y), (255, 255, 0), 2)
-        
-        # Draw eye markers
-        cv2.circle(frame, (left_eye_x, left_eye_y), 5, (255, 0, 255), -1)
-        cv2.circle(frame, (right_eye_x, right_eye_y), 5, (255, 0, 255), -1)
-        
-        # Add text with metrics
-        cv2.putText(frame, f"Concentration: {concentration_score:.2f}", (10, 30), 
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
+        # Fixed indentation - this call was inside the update_countdown function
+        update_countdown(seconds)
+    except ValueError:
+        # Fixed missing message parameter
+        messagebox.showerror("Input Error", "Please enter a valid number")    
 
-        # Update plots
-        if frame_count >= update_interval:
-            head_line.set_xdata(time_stamps)
-            head_line.set_ydata(head_stability_values)
-            
-            face_line.set_xdata(time_stamps)
-            face_line.set_ydata(face_neutrality_values)
-            
-            eye_line.set_xdata(time_stamps)
-            eye_line.set_ydata(eye_gaze_values)
-            
-            task_line.set_xdata(time_stamps)
-            task_line.set_ydata(task_engagement_values)
-            
-            light_line.set_xdata(time_stamps)
-            light_line.set_ydata(light_change_values)
+# Start button
+start_button = tk.Button(timer_page, text="Start Timer", bg="#4CAF50", fg="white", command=start_timer)
+start_button.grid(row=3, column=0, columnspan=3, padx=20, pady=20)    
 
-    # Need to graph both audio level and pattern
-    # Could seperate the graphs to make it easier to see from the other metrics 
-            
-            concentration_line.set_xdata(time_stamps)
-            concentration_line.set_ydata(concentration_scores)
-            
-            # Adjust plot limits
-            ax1.set_xlim(0, max(10, elapsed_time))
-            ax1.set_ylim(0, 1.1)
-              
-            plt.draw()
-            plt.pause(0.01)
+# HELP PAGE
+help_page = tk.Frame(container)
+frames["help"] = help_page
+help_page.grid(row=0, column=0, sticky="nsew")
 
-            # Resetting the frame counter 
-            frame_count = 0 
+# Help page widgets using grid
+help_title = Label(help_page, text="Help & Instructions", font=("Arial", 14, "bold"))
+help_title.grid(row=0, column=0, padx=20, pady=20, columnspan=2)
 
-    # Display the frame
-    cv2.imshow("Concentration Monitoring", frame)
+help_subtitle = Label(help_page, text="How to use DeepSpaceFocus:", font=("Arial", 12))
+help_subtitle.grid(row=1, column=0, padx=20, pady=10, sticky="w", columnspan=2)
 
-    if cv2.waitKey(1) & 0xFF == ord('q'):
-        break
+help_text1 = Label(help_page, text="1. Use the Timer feature to set break reminders")
+help_text1.grid(row=2, column=0, padx=30, pady=5, sticky="w", columnspan=2)
 
-cap.release()
-cv2.destroyAllWindows()
-plt.ioff()
-plt.show()
+help_text2 = Label(help_page, text="2. Navigate using the menu bar at the top")
+help_text2.grid(row=3, column=0, padx=30, pady=5, sticky="w", columnspan=2)
+
+help_text3 = Label(help_page, text="3. Contact support at support@deepspacefocus.com")
+help_text3.grid(row=4, column=0, padx=30, pady=5, sticky="w", columnspan=2)
+
+# ============= MENU CONFIGURATION =============
+# Home Menu
+home_menu = Menu(menu, tearoff=0)
+menu.add_cascade(label="Home", menu=home_menu)
+home_menu.add_command(label="Home", command=lambda: show_frame(home_page))
+
+# Timer Menu
+timer_menu = Menu(menu, tearoff=0)
+menu.add_cascade(label="Timer", menu=timer_menu)
+timer_menu.add_command(label="Set Timer", command=lambda: show_frame(timer_page))
+
+# Help Menu
+help_menu = Menu(menu, tearoff=0)
+menu.add_cascade(label="Help", menu=help_menu)
+help_menu.add_command(label="Controls", command=lambda: show_frame(help_page))
+
+# Configure grid weights to make frames expandable
+container.grid_rowconfigure(0, weight=1)
+container.grid_columnconfigure(0, weight=1)
+
+# Make all frames expand to fill the container
+for frame in frames.values():
+    frame.grid_rowconfigure(0, weight=1)
+    frame.grid_columnconfigure(0, weight=1)
+
+# Show home page initially
+show_frame(frames["home"])
+
+root.mainloop()
+

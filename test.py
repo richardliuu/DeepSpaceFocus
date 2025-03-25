@@ -3,13 +3,6 @@ import mediapipe as mp
 import matplotlib.pyplot as plt
 import numpy as np
 import time
-import pyaudio
-import audioop
-import threading 
-import queue
-import math
-import librosa
-import scipy.stats
 
 # Debug imports
 import traceback
