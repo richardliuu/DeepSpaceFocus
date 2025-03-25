@@ -35,7 +35,7 @@ frame_count = 0
 mp_face_mesh = mp.solutions.face_mesh
 face_mesh = mp_face_mesh.FaceMesh(min_detection_confidence=0.5, min_tracking_confidence=0.5)
 mp_pose = mp.solutions.pose
-pose = mp_pose.Pose()
+pose = mp_pose.Pose(min_detection_confidence = 0.6, min_tracking_confidence=0.6)
 
 cap = cv2.VideoCapture(0)
 
@@ -45,11 +45,10 @@ head_stability_values = []
 face_neutrality_values = []
 eye_gaze_values = []
 light_change_values = []
-task_engagement_values = []
 concentration_scores = []
 
 # Weights for concentration score calculation
-w1, w2, w3, w4, w5 = 0.2, 0.2, 0.2, 0.2, 0.2 
+w1, w2, w3, w4 = 0.25, 0.25, 0.25, 0.25 
 
 # Reference values for normalization
 baseline_movement = 0
@@ -69,7 +68,6 @@ ax1.set_ylabel("Metric Value")
 head_line, = ax1.plot([], [], 'r-', label="Head Stability")
 face_line, = ax1.plot([], [], 'g-', label="Face Neutrality")
 eye_line, = ax1.plot([], [], 'b-', label="Eye Gaze Stability")
-task_line, = ax1.plot([], [], 'c-', label="Task Engagement")
 light_line, = ax1.plot([], [], 'y-', label="Light Stability")
 ax1.legend(loc="upper right")
 
@@ -186,29 +184,6 @@ def calculate_eye_gaze_stability(face_landmarks, prev_gaze=None):
     
     return stability, avg_gaze
 
-def calculate_task_engagement(face_landmarks, head_stability, eye_stability):
-    """
-    Estimate task engagement based on head direction and eye gaze
-    Higher value means more engaged
-    """
-    # Use a combination of head stability and eye gaze stability
-    # Also consider the forward-facing position of the head
-    
-    # Nose tip and forehead landmarks
-    nose_tip = face_landmarks.landmark[4]
-    forehead = face_landmarks.landmark[10]
-    
-    # Measure how forward-facing the face is
-    face_direction = forehead.z - nose_tip.z
-    forward_factor = max(0, min(1, 1 - abs(face_direction) * 5))
-    
-    # Combine factors
-    engagement = (head_stability * 0.4 + 
-                  eye_stability * 0.4 + 
-                  forward_factor * 0.2)
-    
-    return max(0.3, min(1.0, engagement))
-
 def calculate_angle(a, b, c):
     """
     Calculate angle between three points
@@ -312,13 +287,12 @@ def visualize_upper_body_posture(frame, results):
         
         for landmark_type, color, radius in landmark_drawing_spec:
             landmark = results.pose_landmarks.landmark[landmark_type]
-            landmark_point = (
-                int(landmark.x * frame.shape[1]), 
-                int(landmark.y * frame.shape[0])
-            )
-            
-            # Draw colored circle for each landmark
-            cv2.circle(frame, landmark_point, radius, color, -1)
+            if landmark.visibility > 0.5:  # Only draw if landmark is sufficiently visible
+                landmark_point = (
+                    int(landmark.x * frame.shape[1]), 
+                    int(landmark.y * frame.shape[0])
+                )
+                cv2.circle(frame, landmark_point, radius, color, -1)
         
         # Draw line connecting shoulders
         left_shoulder = results.pose_landmarks.landmark[mp_pose.PoseLandmarks.LEFT_SHOULDER]
@@ -401,14 +375,12 @@ while cap.isOpened():
         head_stability, prev_head_pos = calculate_head_stability(pose_landmarks, prev_head_pos)
         light_stability, prev_light = calculate_light_changes(frame, prev_light)
         eye_stability, prev_gaze = calculate_eye_gaze_stability(face_landmarks, prev_gaze)
-        task_engagement = calculate_task_engagement(face_landmarks, head_stability, eye_stability)
 
         # Calculate overall concentration score
         concentration_score = (w1 * face_neutrality + 
-                              w2 * head_stability + 
-                              w3 * task_engagement + 
-                              w4 * eye_stability + 
-                              w5 * light_stability)
+                              w2 * head_stability +  
+                              w3 * eye_stability + 
+                              w4 * light_stability)
 
         # Store data
         time_stamps.append(elapsed_time)
@@ -416,7 +388,6 @@ while cap.isOpened():
         face_neutrality_values.append(face_neutrality)
         eye_gaze_values.append(eye_stability)
         light_change_values.append(light_stability)
-        task_engagement_values.append(task_engagement)
         concentration_scores.append(concentration_score)
 
         # Draw face landmarks on the image
@@ -457,9 +428,6 @@ while cap.isOpened():
             
             eye_line.set_xdata(time_stamps)
             eye_line.set_ydata(eye_gaze_values)
-            
-            task_line.set_xdata(time_stamps)
-            task_line.set_ydata(task_engagement_values)
             
             light_line.set_xdata(time_stamps)
             light_line.set_ydata(light_change_values)
