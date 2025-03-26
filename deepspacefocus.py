@@ -348,7 +348,7 @@ def detect_hunching(landmarks):
 run_monitoring = False
 
 def run_concentration_monitor():
-    global run_monitoring
+    global run_monitoring, monitoring_stop_event
     monitoring_stop_event = threading.Event()
 
     # Weights for concentration score calculation
@@ -404,6 +404,9 @@ def run_concentration_monitor():
     update_interval = 10
     start_time = time.time()
 
+    CONCENTRATION_THRESHOLD = 0.6 
+    LOW_CONCENTRATION_WARNING = False 
+
     while run_monitoring and cap.isOpened():
         ret, frame = cap.read()
         if not ret:
@@ -436,6 +439,19 @@ def run_concentration_monitor():
                                   w4 * light_stability +
                                   w5 * posture_stability +
                                   0.1 * (1 - hunching_score))
+            
+            if concentration_score < CONCENTRATION_THRESHOLD and not LOW_CONCENTRATION_WARNED:
+                # Use Tkinter messagebox for popup
+                r.after(0, lambda: messagebox.showwarning(
+                    "Concentration Alert", 
+                    f"Your concentration has dropped to {concentration_score:.2f}. \n"
+                    "Take a short break or adjust your posture."
+                ))
+                LOW_CONCENTRATION_WARNED = True
+
+            # Reset warning flag if concentration improves
+            if concentration_score >= CONCENTRATION_THRESHOLD:
+                LOW_CONCENTRATION_WARNED = False
 
             # Store data
             time_stamps.append(elapsed_time)
