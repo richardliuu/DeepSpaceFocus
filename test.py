@@ -49,7 +49,18 @@ posture_values = []
 concentration_scores = []
 
 # Weights for concentration score calculation
-w1, w2, w3, w4, w5 = 0.2, 0.2, 0.2, 0.2, 0.2 
+w1, w2, w3, w4, w5 = 0.3, 0.3, 0.15, 0.05, 0.10 
+
+"""
+Weights in order
+
+face_neutrality 
+head_stability 
+eye_stability 
+light_stability 
+posture_stability 
+0.1 * (1 - hunching_score)
+"""
 
 # Reference values for normalization
 baseline_movement = 0
@@ -79,6 +90,7 @@ ax2.set_xlabel("Time (seconds)")
 ax2.set_ylabel("Concentration Score")
 concentration_line, = ax2.plot([], [], 'k-', linewidth=2)
 ax2.set_ylim(0, 1)
+
 
 # Standard MediaPipe face mesh eye landmark indices
 # Left eye
@@ -189,12 +201,8 @@ def calculate_eye_gaze_stability(face_landmarks, prev_gaze=None):
 def calculate_angle(a, b, c):
     """
     Calculate angle between three points
-    
     Args:
         a, b, c (list or numpy array): Landmark coordinates [x, y]
-    
-    Returns:
-        float: Angle in degrees
     """
     a = np.array(a)
     b = np.array(b)
@@ -206,76 +214,224 @@ def calculate_angle(a, b, c):
     return angle if angle <= 180 else 360 - angle
 def analyze_upper_body_posture(landmarks):
     """
-    Analyze upper body posture and return a stability score
+    Enhanced posture stability analysis including neck angle
     
     Args:
         landmarks (list): MediaPipe pose landmarks
     
     Returns:
-        float: Posture stability score (0-1 range)
+        tuple: (Posture stability score, Neck angle)
     """
-    # Key upper body landmarks
-    nose = [
-        landmarks[mp.solutions.pose.PoseLandmark.NOSE.value].x,
-        landmarks[mp.solutions.pose.PoseLandmark.NOSE.value].y
-    ]
-    left_shoulder = [
-        landmarks[mp.solutions.pose.PoseLandmark.LEFT_SHOULDER.value].x,
-        landmarks[mp.solutions.pose.PoseLandmark.LEFT_SHOULDER.value].y
-    ]
-    right_shoulder = [
-        landmarks[mp.solutions.pose.PoseLandmark.RIGHT_SHOULDER.value].x,
-        landmarks[mp.solutions.pose.PoseLandmark.RIGHT_SHOULDER.value].y
-    ]
-    left_ear = [
-        landmarks[mp.solutions.pose.PoseLandmark.LEFT_EAR.value].x,
-        landmarks[mp.solutions.pose.PoseLandmark.LEFT_EAR.value].y
-    ]
-    right_ear = [
-        landmarks[mp.solutions.pose.PoseLandmark.RIGHT_EAR.value].x,
-        landmarks[mp.solutions.pose.PoseLandmark.RIGHT_EAR.value].y
-    ]
+    try:
+        # Validate landmark visibility
+        landmark_visibility = [
+            landmarks[mp.solutions.pose.PoseLandmark.NOSE.value].visibility,
+            landmarks[mp.solutions.pose.PoseLandmark.LEFT_SHOULDER.value].visibility,
+            landmarks[mp.solutions.pose.PoseLandmark.RIGHT_SHOULDER.value].visibility,
+            landmarks[mp.solutions.pose.PoseLandmark.LEFT_EAR.value].visibility,
+            landmarks[mp.solutions.pose.PoseLandmark.RIGHT_EAR.value].visibility
+        ]
+        
+        # Check if any critical landmarks are not visible
+        if any(vis < 0.5 for vis in landmark_visibility):
+            return 0.5, 0  # Return moderate stability if landmarks are unclear
+        
+        # Key landmarks
+        nose = [
+            landmarks[mp.solutions.pose.PoseLandmark.NOSE.value].x,
+            landmarks[mp.solutions.pose.PoseLandmark.NOSE.value].y
+        ]
+        left_shoulder = [
+            landmarks[mp.solutions.pose.PoseLandmark.LEFT_SHOULDER.value].x,
+            landmarks[mp.solutions.pose.PoseLandmark.LEFT_SHOULDER.value].y
+        ]
+        right_shoulder = [
+            landmarks[mp.solutions.pose.PoseLandmark.RIGHT_SHOULDER.value].x,
+            landmarks[mp.solutions.pose.PoseLandmark.RIGHT_SHOULDER.value].y
+        ]
+        left_ear = [
+            landmarks[mp.solutions.pose.PoseLandmark.LEFT_EAR.value].x,
+            landmarks[mp.solutions.pose.PoseLandmark.LEFT_EAR.value].y
+        ]
+        right_ear = [
+            landmarks[mp.solutions.pose.PoseLandmark.RIGHT_EAR.value].x,
+            landmarks[mp.solutions.pose.PoseLandmark.RIGHT_EAR.value].y
+        ]
+        
+        # Calculate shoulder alignment
+        shoulder_midpoint = [
+            (left_shoulder[0] + right_shoulder[0]) / 2,
+            (left_shoulder[1] + right_shoulder[1]) / 2
+        ]
+        
+        # Calculate horizontal levelness of shoulders
+        shoulder_level_deviation = abs(left_shoulder[1] - right_shoulder[1])
+        
+        # Calculate head alignment relative to shoulders
+        vertical_alignment_deviation = abs(nose[0] - shoulder_midpoint[0])
+        
+        # Calculate head tilt
+        head_tilt = abs(calculate_angle(left_ear, nose, right_ear) - 90)
+        
+        # Calculate neck angle
+        def calculate_neck_angle():
+            # Calculate the angle between the vertical line and the neck line
+            vertical_reference = [shoulder_midpoint[0], shoulder_midpoint[1] - 1]
+            
+            # Calculate angle using vectors
+            neck_vector = [nose[0] - shoulder_midpoint[0], nose[1] - shoulder_midpoint[1]]
+            vertical_vector = [vertical_reference[0] - shoulder_midpoint[0], 
+                               vertical_reference[1] - shoulder_midpoint[1]]
+            
+            # Use dot product to find angle
+            dot_product = neck_vector[0]*vertical_vector[0] + neck_vector[1]*vertical_vector[1]
+            magnitude_neck = np.sqrt(neck_vector[0]**2 + neck_vector[1]**2)
+            magnitude_vertical = np.sqrt(vertical_vector[0]**2 + vertical_vector[1]**2)
+            
+            # Prevent division by zero
+            if magnitude_neck == 0 or magnitude_vertical == 0:
+                return 0
+            
+            cos_angle = dot_product / (magnitude_neck * magnitude_vertical)
+            angle = np.arccos(np.clip(cos_angle, -1.0, 1.0)) * 180 / np.pi
+            
+            return angle
+        
+        # Scoring functions
+        def stability_score(deviation, max_deviation):
+            # Inverse exponential to give more penalty for larger deviations
+            return max(0, 1 - (deviation / max_deviation) ** 2)
+        
+        # Define maximum acceptable deviations
+        MAX_SHOULDER_LEVEL = 0.05  # 5% vertical difference
+        MAX_VERTICAL_ALIGNMENT = 0.1  # 10% horizontal offset
+        MAX_HEAD_TILT = 10  # 10 degrees
+        MAX_NECK_ANGLE = 15  # 15 degrees
+        
+        # Calculate stability components
+        shoulder_level_stability = stability_score(shoulder_level_deviation, MAX_SHOULDER_LEVEL)
+        vertical_alignment_stability = stability_score(vertical_alignment_deviation, MAX_VERTICAL_ALIGNMENT)
+        head_tilt_stability = stability_score(head_tilt, MAX_HEAD_TILT)
+        
+        # Calculate neck angle
+        neck_angle = calculate_neck_angle()
+        neck_stability = stability_score(neck_angle, MAX_NECK_ANGLE)
+        
+        # Combined posture stability
+        posture_stability = (
+            shoulder_level_stability * 0.3 +
+            vertical_alignment_stability * 0.2 +
+            head_tilt_stability * 0.2 +
+            neck_stability * 0.3
+        )
+        
+        # Ensure the score is between 0 and 1
+        posture_stability = max(0, min(1, posture_stability))
+        
+        return posture_stability, neck_angle
     
-    # Calculate shoulder alignment and head tilt
-    shoulder_alignment = calculate_angle(
-        [nose[0], left_shoulder[1]], 
-        [(left_shoulder[0] + right_shoulder[0])/2, (left_shoulder[1] + right_shoulder[1])/2], 
-        [nose[0], right_shoulder[1]]
-    )
-    
-    head_tilt = calculate_angle(left_ear, nose, right_ear)
-    
-    # Define ideal ranges for shoulder alignment and head tilt
-    ideal_shoulder_range = (85, 95)
-    ideal_head_tilt_range = (85, 95)
-    
-    # Calculate deviation from ideal posture
-    shoulder_deviation = abs(shoulder_alignment - 90)
-    head_tilt_deviation = abs(head_tilt - 90)
-    
-    # Maximum acceptable deviation before stability is significantly impacted
-    max_shoulder_deviation = 15
-    max_head_tilt_deviation = 15
-    
-    # Calculate stability scores for shoulders and head tilt
-    shoulder_stability = max(0, 1 - (shoulder_deviation / max_shoulder_deviation))
-    head_tilt_stability = max(0, 1 - (head_tilt_deviation / max_head_tilt_deviation))
-    
-    # Combined posture stability (average of shoulder and head tilt stability)
-    posture_stability = (shoulder_stability + head_tilt_stability) / 2
-    
-    return posture_stability
+    except Exception as e:
+        print(f"Error in posture analysis: {e}")
+        return 0.5, 0
 
-def visualize_upper_body_posture(frame, results):
+def detect_hunching(landmarks):
     """
-    Visualize upper body posture landmarks and analysis
+    Detect hunching by analyzing the relative positions of shoulders, spine, and head
     
     Args:
-        frame (numpy.ndarray): Input video frame
-        results (mediapipe.solutions.pose.PoseResults): MediaPipe pose detection results
+        landmarks (list): MediaPipe pose landmarks
     
     Returns:
-        numpy.ndarray: Frame with upper body posture visualization
+        tuple: (hunching_score, diagnostic_details)
+    """
+    try:
+        # Key landmarks for hunching detection
+        nose = landmarks[mp.solutions.pose.PoseLandmark.NOSE.value]
+        left_shoulder = landmarks[mp.solutions.pose.PoseLandmark.LEFT_SHOULDER.value]
+        right_shoulder = landmarks[mp.solutions.pose.PoseLandmark.RIGHT_SHOULDER.value]
+        left_hip = landmarks[mp.solutions.pose.PoseLandmark.LEFT_HIP.value]
+        right_hip = landmarks[mp.solutions.pose.PoseLandmark.RIGHT_HIP.value]
+        
+        # Check visibility of critical landmarks
+        visibility_check = [
+            nose.visibility, 
+            left_shoulder.visibility, 
+            right_shoulder.visibility,
+            left_hip.visibility, 
+            right_hip.visibility
+        ]
+        
+        # Reject if any critical landmark is poorly visible
+        if any(vis < 0.5 for vis in visibility_check):
+            return 0, {"error": "Insufficient landmark visibility"}
+        
+        # Calculate shoulder and hip midpoints
+        shoulder_midpoint = [
+            (left_shoulder.x + right_shoulder.x) / 2,
+            (left_shoulder.y + right_shoulder.y) / 2
+        ]
+        hip_midpoint = [
+            (left_hip.x + right_hip.x) / 2,
+            (left_hip.y + right_hip.y) / 2
+        ]
+        
+        # Calculate vertical alignment
+        # Ideal spine should be relatively straight
+        spine_angle = np.arctan2(
+            shoulder_midpoint[1] - hip_midpoint[1],
+            shoulder_midpoint[0] - hip_midpoint[0]
+        ) * 180 / np.pi
+        
+        # Calculate head-shoulder relationship
+        # How far forward is the head compared to shoulders
+        head_forward_deviation = nose.x - shoulder_midpoint[0]
+        head_vertical_deviation = nose.y - shoulder_midpoint[1]
+        
+        # Calculate shoulder-to-nose distance relative to shoulder width
+        shoulder_width = abs(left_shoulder.x - right_shoulder.x)
+        head_offset_ratio = abs(head_forward_deviation) / shoulder_width
+        
+        # Hunching indicators
+        hunching_indicators = {
+            "spine_angle": abs(spine_angle),  # Deviation from vertical
+            "head_forward_ratio": head_offset_ratio,
+            "vertical_head_drop": head_vertical_deviation
+        }
+        
+        # Scoring mechanism
+        # Lower scores indicate more hunching
+        MAX_ACCEPTABLE_SPINE_ANGLE = 20  # degrees
+        MAX_HEAD_FORWARD_RATIO = 0.3  # proportion of shoulder width
+        MAX_VERTICAL_DROP = 0.1  # proportion of body height
+        
+        # Calculate hunching score
+        spine_score = 1 - min(1, abs(spine_angle) / MAX_ACCEPTABLE_SPINE_ANGLE)
+        head_forward_score = 1 - min(1, head_offset_ratio / MAX_HEAD_FORWARD_RATIO)
+        vertical_drop_score = 1 - min(1, abs(head_vertical_deviation) / MAX_VERTICAL_DROP)
+        
+        # Weighted average of scores
+        hunching_score = (
+            spine_score * 0.4 + 
+            head_forward_score * 0.3 + 
+            vertical_drop_score * 0.3
+        )
+        
+        # Invert score so that lower values (more hunching) approach 0
+        hunching_score = max(0, min(1, hunching_score))
+        
+        return hunching_score, hunching_indicators
+    
+    except Exception as e:
+        print(f"Error in hunching detection: {e}")
+        return 0, {"error": str(e)}
+    
+def visualize_upper_body_posture(frame, results):
+    """
+    Visualize upper body posture landmarks and display a numeric posture stability score.
+    
+    Args:
+        frame (numpy.ndarray): Input video frame.
+        results (mediapipe.solutions.pose.PoseResults): MediaPipe pose detection results.
     """
     # Initialize MediaPipe drawing utilities
     mp_drawing = mp.solutions.drawing_utils
@@ -283,28 +439,27 @@ def visualize_upper_body_posture(frame, results):
 
     # Check if landmarks are detected
     if results.pose_landmarks:
-        # Draw all upper body landmarks with specific colors and sizes
+        # Draw key upper body landmarks with specific colors and sizes
         landmark_drawing_spec = [
-            (mp_pose.PoseLandmarks.NOSE, (0, 255, 0), 7),  # Green for nose
-            (mp_pose.PoseLandmarks.LEFT_SHOULDER, (255, 0, 0), 10),  # Blue for left shoulder
-            (mp_pose.PoseLandmarks.RIGHT_SHOULDER, (0, 0, 255), 10),  # Red for right shoulder
-            (mp_pose.PoseLandmarks.LEFT_EAR, (255, 255, 0), 5),  # Yellow for left ear
-            (mp_pose.PoseLandmarks.RIGHT_EAR, (255, 255, 0), 5)  # Yellow for right ear
+            (mp_pose.PoseLandmark.NOSE, (0, 255, 0), 7),          # Green for nose
+            (mp_pose.PoseLandmark.LEFT_SHOULDER, (255, 0, 0), 10),  # Blue for left shoulder
+            (mp_pose.PoseLandmark.RIGHT_SHOULDER, (0, 0, 255), 10), # Red for right shoulder
+            (mp_pose.PoseLandmark.LEFT_EAR, (255, 255, 0), 5),      # Yellow for left ear
+            (mp_pose.PoseLandmark.RIGHT_EAR, (255, 255, 0), 5)      # Yellow for right ear
         ]
         
         for landmark_type, color, radius in landmark_drawing_spec:
-            landmark = results.pose_landmarks.landmark[landmark_type]
-            if landmark.visibility > 0.5:  # Only draw if landmark is sufficiently visible
+            landmark = results.pose_landmarks.landmark[landmark_type.value]
+            if landmark.visibility > 0.5:  # Only draw if the landmark is sufficiently visible
                 landmark_point = (
-                    int(landmark.x * frame.shape[1]), 
+                    int(landmark.x * frame.shape[1]),
                     int(landmark.y * frame.shape[0])
                 )
                 cv2.circle(frame, landmark_point, radius, color, -1)
         
         # Draw line connecting shoulders
-        left_shoulder = results.pose_landmarks.landmark[mp_pose.PoseLandmarks.LEFT_SHOULDER]
-        right_shoulder = results.pose_landmarks.landmark[mp_pose.PoseLandmarks.RIGHT_SHOULDER]
-        
+        left_shoulder = results.pose_landmarks.landmark[mp_pose.PoseLandmark.LEFT_SHOULDER]
+        right_shoulder = results.pose_landmarks.landmark[mp_pose.PoseLandmark.RIGHT_SHOULDER]
         left_shoulder_point = (
             int(left_shoulder.x * frame.shape[1]), 
             int(left_shoulder.y * frame.shape[0])
@@ -313,41 +468,44 @@ def visualize_upper_body_posture(frame, results):
             int(right_shoulder.x * frame.shape[1]), 
             int(right_shoulder.y * frame.shape[0])
         )
-        
-        # Draw shoulder line
         cv2.line(frame, left_shoulder_point, right_shoulder_point, (0, 255, 255), 3)
+
+                # Calculate posture stability and neck angle
+        posture_stability, neck_angle = analyze_upper_body_posture(results.pose_landmarks.landmark)
+        hunching_score, hunching_details = detect_hunching(results.pose_landmarks.landmark)
         
-        # Analyze posture
-        posture_analysis = analyze_upper_body_posture(results.pose_landmarks.landmark)
+        # Visualize neck line
+        nose = results.pose_landmarks.landmark[mp_pose.PoseLandmark.NOSE]
+        left_shoulder = results.pose_landmarks.landmark[mp_pose.PoseLandmark.LEFT_SHOULDER]
+        right_shoulder = results.pose_landmarks.landmark[mp_pose.PoseLandmark.RIGHT_SHOULDER]
         
-        # Prepare text for display
-        posture_status = (
-            "Aligned" if posture_analysis['is_aligned'] else 
-            "Tilting Left" if posture_analysis['tilting_left'] else 
-            "Tilting Right" if posture_analysis['tilting_right'] else 
-            "Rotated Shoulders" if posture_analysis['shoulders_rotated'] else 
-            "Misaligned"
-        )
+        # Calculate shoulder midpoint
+        shoulder_midpoint_x = (left_shoulder.x + right_shoulder.x) / 2
+        shoulder_midpoint_y = (left_shoulder.y + right_shoulder.y) / 2
         
-        # Display posture status and shoulder alignment angle
-        cv2.putText(
-            frame, 
-            f"Posture: {posture_status}", 
-            (10, 30), 
-            cv2.FONT_HERSHEY_SIMPLEX, 
-            0.7, 
-            (255, 255, 255), 
-            2
+        # Draw neck line
+        nose_point = (
+            int(nose.x * frame.shape[1]),
+            int(nose.y * frame.shape[0])
         )
-        cv2.putText(
-            frame, 
-            f"Shoulder Alignment: {posture_analysis['shoulder_alignment']:.2f}°", 
-            (10, 60), 
-            cv2.FONT_HERSHEY_SIMPLEX, 
-            0.7, 
-            (255, 255, 255), 
-            2
+        shoulder_midpoint = (
+            int(shoulder_midpoint_x * frame.shape[1]),
+            int(shoulder_midpoint_y * frame.shape[0])
         )
+        cv2.line(frame, shoulder_midpoint, nose_point, (0, 165, 255), 3)
+        
+        # Analyze posture and obtain a numeric stability score
+        posture_stability = analyze_upper_body_posture(results.pose_landmarks.landmark)
+        
+        # Display the numeric posture stability value on the frame
+        """cv2.putText(frame, 
+                    f"Posture Stability: {posture_stability:.2f}", 
+                    (10, 30), 
+                    cv2.FONT_HERSHEY_SIMPLEX, 
+                    0.7, 
+                    (255, 255, 255), 
+                    2)
+        """
     
     return frame
 
@@ -376,20 +534,23 @@ while cap.isOpened():
     if face_results.multi_face_landmarks and pose_results.pose_landmarks:
         face_landmarks = face_results.multi_face_landmarks[0]
         pose_landmarks = pose_results.pose_landmarks
+        frame = visualize_upper_body_posture(frame, pose_results)
 
         # Calculate all metrics
         face_neutrality = calculate_face_neutrality(face_landmarks)
         head_stability, prev_head_pos = calculate_head_stability(pose_landmarks, prev_head_pos)
         light_stability, prev_light = calculate_light_changes(frame, prev_light)
         eye_stability, prev_gaze = calculate_eye_gaze_stability(face_landmarks, prev_gaze)
-        posture_stability = analyze_upper_body_posture(pose_landmarks.landmark)
+        posture_stability, neck_angle = analyze_upper_body_posture(pose_landmarks.landmark)
+        hunching_score, _ = detect_hunching(pose_results.pose_landmarks.landmark)
 
         # Calculate overall concentration score
         concentration_score = (w1 * face_neutrality + 
                               w2 * head_stability +  
                               w3 * eye_stability + 
                               w4 * light_stability +
-                              w5 * posture_stability)
+                              w5 * posture_stability +
+                              0.1 * (1 - hunching_score))
 
         # Store data
         time_stamps.append(elapsed_time)
@@ -451,6 +612,8 @@ while cap.isOpened():
             # Adjust plot limits
             ax1.set_xlim(0, max(10, elapsed_time))
             ax1.set_ylim(0, 1.1)
+
+            ax2.set_xlim(0, max(10, elapsed_time))
               
             plt.draw()
             plt.pause(0.01)
