@@ -1,3 +1,6 @@
+# ====== MODEL INCLUDES POPUP ====== 
+# FIRST PART OF THE EXPERIMENT
+
 import matplotlib
 matplotlib.use('TkAgg')
 
