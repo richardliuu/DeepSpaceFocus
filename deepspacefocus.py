@@ -1,6 +1,7 @@
 # ====== MODEL INCLUDES POPUP ====== 
 # FIRST PART OF THE EXPERIMENT
-
+import os
+import sys
 import matplotlib
 matplotlib.use('TkAgg')
 
@@ -11,8 +12,240 @@ import numpy as np
 import time
 import threading
 import tkinter as tk
-from tkinter import Menu, Label, Entry, StringVar
-from tkinter import ttk, messagebox
+from tkinter import Menu, Label, Entry, StringVar, ttk, messagebox
+
+def get_resource_path(relative_path):
+    try:
+        base_path = sys._MEIPASS
+    except Exception:
+        base_path = os.path.abspath(".")
+
+    return os.path.join(base_path, relative_path)
+
+def initialize_mediapipe_solutions():
+    try:
+        mp_base_path = get_resource_path('mediapipe')
+        
+        # Update the MediaPipe module search path
+        if mp_base_path:
+            os.environ['MEDIAPIPE_BINARY_PATH'] = mp_base_path
+
+        mp_face_mesh = mp.solutions.face_mesh
+        mp_pose = mp.solutions.pose
+
+        face_mesh = mp_face_mesh.FaceMesh(
+            min_detection_confidence=0.5, 
+            min_tracking_confidence=0.5,
+            static_image_mode=False
+        )
+        pose = mp_pose.Pose(
+            min_detection_confidence=0.6, 
+            min_tracking_confidence=0.6,
+            static_image_mode=False
+        )
+
+        return face_mesh, pose
+
+    except Exception as e:
+        print(f"Error initializing MediaPipe: {e}")
+        return None, None
+
+def apply_modern_theme(r):
+    """
+    Apply a modern, dark-themed styling to Tkinter windows
+    """
+    # Configure root window style
+    r.configure(bg='#1E1E1E')  
+    
+    style = ttk.Style()
+    
+    # Configure overall theme
+    style.theme_use('clam') 
+    
+    bg_color = '#1E1E1E'       
+    fg_color = '#FFFFFF'       
+    accent_color = '#2C3E50'   
+    button_color = '#34495E'   
+    
+    # Style for buttons
+    style.configure('TButton', 
+        background=button_color,
+        foreground=fg_color,
+        font=('Arial', 10),
+        borderwidth=0,
+        relief='flat'
+    )
+    
+    # Hover effect for buttons
+    style.map('TButton',
+        background=[('active', '#455A64')],
+        foreground=[('active', 'white')]
+    )
+    
+    # Style for labels
+    style.configure('TLabel', 
+        background=bg_color,
+        foreground=fg_color,
+        font=('Arial', 10)
+    )
+    
+    # Style for entry widgets
+    style.configure('TEntry', 
+        background='#2C3E50',
+        foreground=fg_color,
+        fieldbackground='#2C3E50'
+    )
+    
+    return style
+
+class SmoothPopup:
+    _last_popup_time = 0
+    
+    def __init__(self, parent, message, title="Alert", duration=5):
+        self.parent = parent if isinstance(parent, (tk.Tk, tk.Toplevel)) else parent.winfo_toplevel()
+        
+        if not hasattr(self.parent, '_theme_applied'):
+            apply_modern_theme(self.parent)
+            self.parent._theme_applied = True
+        
+        self.message = message
+        self.title = title
+        self.duration = duration
+        
+        current_time = time.time()
+        if current_time - SmoothPopup._last_popup_time < 5:
+            return 
+        
+        SmoothPopup._last_popup_time = current_time
+        
+        # Main Thread popup
+        self.create_popup()
+    
+    def create_popup(self):
+        def create():
+            try:
+                # Popup window configuration
+                self.popup = tk.Toplevel(self.parent)
+                self.popup.overrideredirect(True)  
+                self.popup.wm_attributes("-topmost", True)  
+                
+                # Screen dimensions
+                screen_width = self.parent.winfo_screenwidth()
+                screen_height = self.parent.winfo_screenheight()
+                
+                # Popup dimensions
+                popup_width = 300
+                popup_height = 150
+                
+                # Position popup just off-screen to the right
+                self.popup.geometry(f"{popup_width}x{popup_height}+{screen_width}+{screen_height//2}")
+                
+                # Popup styling
+                self.popup.configure(bg='#1E1E1E')  # Dark background
+                
+                # Title label
+                title_label = ttk.Label(
+                    self.popup, 
+                    text=self.title, 
+                    style='TLabel',
+                    font=("Arial", 12, "bold")
+                )
+                title_label.pack(pady=(10, 5))
+                
+                # Message label
+                message_label = ttk.Label(
+                    self.popup, 
+                    text=self.message, 
+                    style='TLabel',
+                    wraplength=280
+                )
+                message_label.pack(pady=(5, 10))
+                
+                # Close button
+                close_button = ttk.Button(
+                    self.popup, 
+                    text="Dismiss", 
+                    style='TButton',
+                    command=self.close_popup
+                )
+                close_button.pack(pady=(10, 10))
+                
+                threading.Thread(target=self.animate_popup, daemon=True).start()
+            
+            except Exception as e:
+                print(f"Error creating popup: {e}")
+        
+        if self.parent.winfo_exists():
+            self.parent.after(0, create)
+    
+    def close_popup(self):
+        try:
+            if hasattr(self, 'popup') and self.popup and self.popup.winfo_exists():
+                self.popup.destroy()
+        except Exception as e:
+            print(f"Error closing popup: {e}")
+    
+    def animate_popup(self):
+        try:
+            if not hasattr(self, 'popup') or not self.popup or not self.popup.winfo_exists():
+                return
+            
+            screen_width = self.parent.winfo_screenwidth()
+            screen_height = self.parent.winfo_screenheight()
+            
+            # Sliding in
+            current_x = screen_width
+            target_x = screen_width - 320
+            
+            while current_x > target_x:
+                # Use after method for thread-safe updates
+                def update_geometry(x):
+                    try:
+                        if self.popup and self.popup.winfo_exists():
+                            self.popup.geometry(f"300x150+{x}+{screen_height//2}")
+                    except Exception as e:
+                        print(f"Geometry update error: {e}")
+                
+                self.parent.after(0, lambda x=current_x: update_geometry(x))
+                current_x -= 20
+                time.sleep(0.02)
+            
+            time.sleep(self.duration)
+            
+            while current_x < screen_width:
+                # Use after method for thread-safe updates
+                def update_geometry(x):
+                    try:
+                        if self.popup and self.popup.winfo_exists():
+                            self.popup.geometry(f"300x150+{x}+{screen_height//2}")
+                    except Exception as e:
+                        print(f"Geometry update error: {e}")
+                
+                self.parent.after(0, lambda x=current_x: update_geometry(x))
+                current_x += 20
+                time.sleep(0.02)
+            
+            # Close popup
+            self.parent.after(0, self.close_popup)
+        
+        except Exception as e:
+            print(f"Error in popup animation: {e}")
+
+def setup_themed_tkinter(r):
+    apply_modern_theme(r)
+    
+    def update_widget_styles(widget):
+        if isinstance(widget, ttk.Button):
+            widget.configure(style='TButton')
+        elif isinstance(widget, ttk.Label):
+            widget.configure(style='TLabel')
+        
+        # Recursively update child widgets
+        for child in widget.winfo_children():
+            update_widget_styles(child)
+    
+    # All widgets styled
+    update_widget_styles(r)
 
 # Global flag for monitoring
 run_monitoring = False
@@ -47,14 +280,13 @@ def calculate_face_neutrality(face_landmarks):
 
 def calculate_head_stability(pose_landmarks, prev_head_pos=None):
     """
-    Calculate head stability based on how much the head moves
     Higher value means more stable (less movement)
     """
     if pose_landmarks:
         nose = pose_landmarks.landmark[mp_pose.PoseLandmark.NOSE]
         
         if prev_head_pos is None:
-            return 0.9, (nose.x, nose.y)  # Initial stability is high
+            return 0.9, (nose.x, nose.y)
         
         # Calculate movement from previous position
         movement = np.sqrt((nose.x - prev_head_pos[0])**2 + 
@@ -69,13 +301,12 @@ def calculate_head_stability(pose_landmarks, prev_head_pos=None):
 
 def calculate_light_changes(frame, prev_light=None):
     """
-    Calculate light stability
     Higher value means more stable lighting
     """
     current_light = np.mean(cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY))
     
     if prev_light is None:
-        return 0.9, current_light  # Initial stability is high
+        return 0.9, current_light
     
     # Calculate change in lighting
     light_diff = abs(current_light - prev_light) / 255.0
@@ -444,12 +675,12 @@ def run_concentration_monitor():
                                   0.1 * (1 - hunching_score))
             
             if concentration_score < CONCENTRATION_THRESHOLD and not LOW_CONCENTRATION_WARNED:
-                # Use Tkinter messagebox for popup
-                r.after(0, lambda: messagebox.showwarning(
-                    "Concentration Alert", 
+                SmoothPopup(
+                    r,  
                     f"Your concentration has dropped to {concentration_score:.2f}. \n"
-                    "Take a short break or adjust your posture."
-                ))
+                    "Take a short break using the break timer or adjust your posture.",
+                    "Concentration Alert"
+                )
                 LOW_CONCENTRATION_WARNED = True
 
             # Reset warning flag if concentration improves
@@ -730,4 +961,5 @@ for frame in frames.values():
 # Show home page initially
 show_frame(frames["home"])
 
+setup_themed_tkinter(r)
 r.mainloop()
