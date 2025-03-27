@@ -1,112 +1,32 @@
+# ====== MODEL DOES NOT INCLUDE POPUP ====== 
+# ====== TO BE THE SECOND PART OF THE EXPERIMENT
+
+import matplotlib
+matplotlib.use('TkAgg')
+
 import cv2
 import mediapipe as mp
 import matplotlib.pyplot as plt
 import numpy as np
 import time
+import threading
+import tkinter as tk
+from tkinter import Menu, Label, Entry, StringVar
+from tkinter import ttk, messagebox
 
-# Debug imports
-import traceback
-import sys 
-
-from scipy.signal import find_peaks
-
-import os 
-os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
-
-import tensorflow as tf
-tf.get_logger().setLevel('ERROR')
-
-#  ======= TKINTER WINDOW STARTUP ============ 
-
-"""import tkinter as tk
-from tkinter import ttk, messagebox, Menu, Label, Entry, StringVar 
-
-root = tk.Tk()
-root.geometry("")"""
-
-# Set to 0 to avoid messages 
-# 2 for warnings 
-
-# Frame 
-update_interval = 10
-frame_count = 0
+# Global flag for monitoring
+run_monitoring = False
+monitoring_thread = None
 
 # Initialize MediaPipe solutions
 mp_face_mesh = mp.solutions.face_mesh
-face_mesh = mp_face_mesh.FaceMesh(min_detection_confidence=0.5, min_tracking_confidence=0.5)
 mp_pose = mp.solutions.pose
-pose = mp_pose.Pose(min_detection_confidence = 0.6, min_tracking_confidence=0.6)
-
-cap = cv2.VideoCapture(0)
-
-# Lists to store metrics data
-time_stamps = []
-head_stability_values = []
-face_neutrality_values = []
-eye_gaze_values = []
-light_change_values = []
-posture_values = []
-concentration_scores = []
-
-# Weights for concentration score calculation
-w1, w2, w3, w4, w5 = 0.3, 0.3, 0.15, 0.05, 0.10 
-
-"""
-Weights in order
-
-face_neutrality 
-head_stability 
-eye_stability 
-light_stability 
-posture_stability 
-0.1 * (1 - hunching_score)
-"""
-
-# Reference values for normalization
-baseline_movement = 0
-baseline_samples = 0
-baseline_period = 5  # seconds to establish 
-
-start_time = time.time()
-
-# Set up interactive plotting
-plt.ion() 
-fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(8, 6))
-
-# Primary plot for individual metrics
-ax1.set_title("Individual Concentration Metrics")
-ax1.set_xlabel("Time (seconds)")
-ax1.set_ylabel("Metric Value")
-head_line, = ax1.plot([], [], 'r-', label="Head Stability")
-face_line, = ax1.plot([], [], 'g-', label="Face Neutrality")
-eye_line, = ax1.plot([], [], 'b-', label="Eye Gaze Stability")
-light_line, = ax1.plot([], [], 'y-', label="Light Stability")
-posture_line, = ax1.plot([], [], 'p-', label="Posture Stability")
-ax1.legend(loc="upper right")
-
-# Secondary plot for overall concentration score
-ax2.set_title("Overall Concentration Score")
-ax2.set_xlabel("Time (seconds)")
-ax2.set_ylabel("Concentration Score")
-concentration_line, = ax2.plot([], [], 'k-', linewidth=2)
-ax2.set_ylim(0, 1)
-
-
-# Standard MediaPipe face mesh eye landmark indices
-# Left eye
-LEFT_EYE_INDICES = [33, 133, 160, 159, 158, 144, 145, 153]  # Outline landmarks
-LEFT_IRIS_CENTER_APPROX = 159  # Center of left eye (approximate)
-
-# Right eye
-RIGHT_EYE_INDICES = [362, 263, 386, 385, 384, 398, 386, 374]  # Outline landmarks
-RIGHT_IRIS_CENTER_APPROX = 386  # Center of right eye (approximate)
 
 def calculate_face_neutrality(face_landmarks):
     """
     Calculate face neutrality based on landmark positions
     Lower values mean more neutral expression
     """
-    # Measure the deviation of mouth corners and eyebrows from neutral position
     # Mouth landmarks
     left_mouth = face_landmarks.landmark[61]
     right_mouth = face_landmarks.landmark[291]
@@ -170,6 +90,10 @@ def calculate_eye_gaze_stability(face_landmarks, prev_gaze=None):
     Calculate eye gaze stability by tracking eye landmarks
     Higher value means more stable gaze
     """
+    # Standard face mesh eye landmark indices
+    LEFT_IRIS_CENTER_APPROX = 159
+    RIGHT_IRIS_CENTER_APPROX = 386
+
     # Use standard face mesh eye landmarks instead of iris
     left_eye_center = face_landmarks.landmark[LEFT_IRIS_CENTER_APPROX]
     right_eye_center = face_landmarks.landmark[RIGHT_IRIS_CENTER_APPROX]
@@ -198,23 +122,9 @@ def calculate_eye_gaze_stability(face_landmarks, prev_gaze=None):
     
     return stability, avg_gaze
 
-def calculate_angle(a, b, c):
-    """
-    Calculate angle between three points
-    Args:
-        a, b, c (list or numpy array): Landmark coordinates [x, y]
-    """
-    a = np.array(a)
-    b = np.array(b)
-    c = np.array(c)
-    
-    radians = np.arctan2(c[1]-b[1], c[0]-b[0]) - np.arctan2(a[1]-b[1], a[0]-b[0])
-    angle = np.abs(radians * 180.0 / np.pi)
-    
-    return angle if angle <= 180 else 360 - angle
 def analyze_upper_body_posture(landmarks):
     """
-    Enhanced posture stability analysis including neck angle
+    Enhanced posture stability analysis
     
     Args:
         landmarks (list): MediaPipe pose landmarks
@@ -258,7 +168,7 @@ def analyze_upper_body_posture(landmarks):
             landmarks[mp.solutions.pose.PoseLandmark.RIGHT_EAR.value].y
         ]
         
-        # Calculate shoulder alignment
+        # Calculate shoulder midpoint
         shoulder_midpoint = [
             (left_shoulder[0] + right_shoulder[0]) / 2,
             (left_shoulder[1] + right_shoulder[1]) / 2
@@ -273,7 +183,6 @@ def analyze_upper_body_posture(landmarks):
         # Calculate head tilt
         head_tilt = abs(calculate_angle(left_ear, nose, right_ear) - 90)
         
-        # Calculate neck angle
         def calculate_neck_angle():
             # Calculate the angle between the vertical line and the neck line
             vertical_reference = [shoulder_midpoint[0], shoulder_midpoint[1] - 1]
@@ -297,7 +206,6 @@ def analyze_upper_body_posture(landmarks):
             
             return angle
         
-        # Scoring functions
         def stability_score(deviation, max_deviation):
             # Inverse exponential to give more penalty for larger deviations
             return max(0, 1 - (deviation / max_deviation) ** 2)
@@ -333,6 +241,21 @@ def analyze_upper_body_posture(landmarks):
     except Exception as e:
         print(f"Error in posture analysis: {e}")
         return 0.5, 0
+
+def calculate_angle(a, b, c):
+    """
+    Calculate angle between three points
+    Args:
+        a, b, c (list or numpy array): Landmark coordinates [x, y]
+    """
+    a = np.array(a)
+    b = np.array(b)
+    c = np.array(c)
+    
+    radians = np.arctan2(c[1]-b[1], c[0]-b[0]) - np.arctan2(a[1]-b[1], a[0]-b[0])
+    angle = np.abs(radians * 180.0 / np.pi)
+    
+    return angle if angle <= 180 else 360 - angle
 
 def detect_hunching(landmarks):
     """
@@ -425,209 +348,370 @@ def detect_hunching(landmarks):
         print(f"Error in hunching detection: {e}")
         return 0, {"error": str(e)}
     
-def visualize_upper_body_posture(frame, results):
-    """
-    Visualize upper body posture landmarks and display a numeric posture stability score.
+run_monitoring = False
+
+def run_concentration_monitor():
+    global run_monitoring, monitoring_stop_event
+    monitoring_stop_event = threading.Event()
+
+    # Weights for concentration score calculation
+    w1, w2, w3, w4, w5 = 0.3, 0.3, 0.15, 0.05, 0.10 
+
+    # Initialize MediaPipe solutions
+    face_mesh = mp_face_mesh.FaceMesh(min_detection_confidence=0.5, min_tracking_confidence=0.5)
+    pose = mp_pose.Pose(min_detection_confidence=0.6, min_tracking_confidence=0.6)
+
+    # Lists to store metrics data
+    time_stamps = []
+    head_stability_values = []
+    face_neutrality_values = []
+    eye_gaze_values = []
+    light_change_values = []
+    posture_values = []
+    concentration_scores = []
+
+    # Set up plotting
+    plt.ion() 
+    fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(8, 6))
+
+    # Primary plot for individual metrics
+    ax1.set_title("Individual Concentration Metrics")
+    ax1.set_xlabel("Time (seconds)")
+    ax1.set_ylabel("Metric Value")
+    head_line, = ax1.plot([], [], 'r-', label="Head Stability")
+    face_line, = ax1.plot([], [], 'g-', label="Face Neutrality")
+    eye_line, = ax1.plot([], [], 'b-', label="Eye Gaze Stability")
+    light_line, = ax1.plot([], [], 'y-', label="Light Stability")
+    posture_line, = ax1.plot([], [], 'p-', label="Posture Stability")
+    ax1.legend(loc="upper right")
+
+    # Secondary plot for overall concentration score
+    ax2.set_title("Overall Concentration Score")
+    ax2.set_xlabel("Time (seconds)")
+    ax2.set_ylabel("Concentration Score")
+    concentration_line, = ax2.plot([], [], 'k-', linewidth=2)
+    ax2.set_ylim(0, 1)
+
+    plt.tight_layout()
+
+    # Open camera
+    cap = cv2.VideoCapture(0)
+
+    # Variables to store previous values
+    prev_head_pos = None
+    prev_light = None
+    prev_gaze = None
+
+    # Tracking variables
+    frame_count = 0
+    update_interval = 10
+    start_time = time.time()
+
+    while run_monitoring and cap.isOpened():
+        ret, frame = cap.read()
+        if not ret:
+            break
+
+        frame_count += 1
+        elapsed_time = time.time() - start_time
+
+        # Convert to RGB for MediaPipe
+        rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        face_results = face_mesh.process(rgb_frame)
+        pose_results = pose.process(rgb_frame)
+
+        if face_results.multi_face_landmarks and pose_results.pose_landmarks:
+            face_landmarks = face_results.multi_face_landmarks[0]
+            pose_landmarks = pose_results.pose_landmarks
+
+            # Calculate all metrics
+            face_neutrality = calculate_face_neutrality(face_landmarks)
+            head_stability, prev_head_pos = calculate_head_stability(pose_landmarks, prev_head_pos)
+            light_stability, prev_light = calculate_light_changes(frame, prev_light)
+            eye_stability, prev_gaze = calculate_eye_gaze_stability(face_landmarks, prev_gaze)
+            posture_stability, neck_angle = analyze_upper_body_posture(pose_landmarks.landmark)
+            hunching_score, _ = detect_hunching(pose_results.pose_landmarks.landmark)
+
+            # Calculate overall concentration score
+            concentration_score = (w1 * face_neutrality + 
+                                  w2 * head_stability +  
+                                  w3 * eye_stability + 
+                                  w4 * light_stability +
+                                  w5 * posture_stability +
+                                  0.1 * (1 - hunching_score))
+            
+            # Store data
+            time_stamps.append(elapsed_time)
+            head_stability_values.append(head_stability)
+            face_neutrality_values.append(face_neutrality)
+            eye_gaze_values.append(eye_stability)
+            light_change_values.append(light_stability)
+            posture_values.append(posture_stability)
+            concentration_scores.append(concentration_score)
+
+            # Update plots
+            if frame_count >= update_interval:
+                head_line.set_xdata(time_stamps)
+                head_line.set_ydata(head_stability_values)
+                
+                face_line.set_xdata(time_stamps)
+                face_line.set_ydata(face_neutrality_values)
+                
+                eye_line.set_xdata(time_stamps)
+                eye_line.set_ydata(eye_gaze_values)
+                
+                light_line.set_xdata(time_stamps)
+                light_line.set_ydata(light_change_values)
+
+                posture_line.set_xdata(time_stamps)
+                posture_line.set_ydata(posture_values)
+
+                concentration_line.set_xdata(time_stamps)
+                concentration_line.set_ydata(concentration_scores)
+                
+                # Adjust plot limits
+                ax1.set_xlim(0, max(10, elapsed_time))
+                ax1.set_ylim(0, 1.1)
+
+                ax2.set_xlim(0, max(10, elapsed_time))
+                  
+                plt.draw()
+                plt.pause(0.01)
+
+                # Resetting the frame counter 
+                frame_count = 0 
+
+    try:
+        while run_monitoring and not monitoring_stop_event.is_set() and cap.isOpened():
+            ret, frame = cap.read()
+            if not ret:
+                break
+
+            # Add a periodic check for stop condition
+            if not run_monitoring:
+                monitoring_stop_event.set()
+                break
+
+            # Existing frame display and key check
+            cv2.imshow("Concentration Monitoring", frame)
+            if cv2.waitKey(1) & 0xFF == ord('q'):
+                break
+
+    except Exception as e:
+        print(f"Error in concentration monitoring: {e}")
     
-    Args:
-        frame (numpy.ndarray): Input video frame.
-        results (mediapipe.solutions.pose.PoseResults): MediaPipe pose detection results.
-    """
-    # Initialize MediaPipe drawing utilities
-    mp_drawing = mp.solutions.drawing_utils
-    mp_pose = mp.solutions.pose
+    finally:
+        # Comprehensive cleanup
+        try:
+            cap.release()
+            cv2.destroyAllWindows()
+            plt.close(fig)
+            plt.close('all')  # Ensure all matplotlib windows are closed
+        except Exception as cleanup_error:
+            print(f"Error during cleanup: {cleanup_error}")
 
-    # Check if landmarks are detected
-    if results.pose_landmarks:
-        # Draw key upper body landmarks with specific colors and sizes
-        landmark_drawing_spec = [
-            (mp_pose.PoseLandmark.NOSE, (0, 255, 0), 7),          # Green for nose
-            (mp_pose.PoseLandmark.LEFT_SHOULDER, (255, 0, 0), 10),  # Blue for left shoulder
-            (mp_pose.PoseLandmark.RIGHT_SHOULDER, (0, 0, 255), 10), # Red for right shoulder
-            (mp_pose.PoseLandmark.LEFT_EAR, (255, 255, 0), 5),      # Yellow for left ear
-            (mp_pose.PoseLandmark.RIGHT_EAR, (255, 255, 0), 5)      # Yellow for right ear
-        ]
-        
-        for landmark_type, color, radius in landmark_drawing_spec:
-            landmark = results.pose_landmarks.landmark[landmark_type.value]
-            if landmark.visibility > 0.5:  # Only draw if the landmark is sufficiently visible
-                landmark_point = (
-                    int(landmark.x * frame.shape[1]),
-                    int(landmark.y * frame.shape[0])
-                )
-                cv2.circle(frame, landmark_point, radius, color, -1)
-        
-        # Draw line connecting shoulders
-        left_shoulder = results.pose_landmarks.landmark[mp_pose.PoseLandmark.LEFT_SHOULDER]
-        right_shoulder = results.pose_landmarks.landmark[mp_pose.PoseLandmark.RIGHT_SHOULDER]
-        left_shoulder_point = (
-            int(left_shoulder.x * frame.shape[1]), 
-            int(left_shoulder.y * frame.shape[0])
-        )
-        right_shoulder_point = (
-            int(right_shoulder.x * frame.shape[1]), 
-            int(right_shoulder.y * frame.shape[0])
-        )
-        cv2.line(frame, left_shoulder_point, right_shoulder_point, (0, 255, 255), 3)
+    print("Concentration monitoring stopped.")
 
-                # Calculate posture stability and neck angle
-        posture_stability, neck_angle = analyze_upper_body_posture(results.pose_landmarks.landmark)
-        hunching_score, hunching_details = detect_hunching(results.pose_landmarks.landmark)
-        
-        # Visualize neck line
-        nose = results.pose_landmarks.landmark[mp_pose.PoseLandmark.NOSE]
-        left_shoulder = results.pose_landmarks.landmark[mp_pose.PoseLandmark.LEFT_SHOULDER]
-        right_shoulder = results.pose_landmarks.landmark[mp_pose.PoseLandmark.RIGHT_SHOULDER]
-        
-        # Calculate shoulder midpoint
-        shoulder_midpoint_x = (left_shoulder.x + right_shoulder.x) / 2
-        shoulder_midpoint_y = (left_shoulder.y + right_shoulder.y) / 2
-        
-        # Draw neck line
-        nose_point = (
-            int(nose.x * frame.shape[1]),
-            int(nose.y * frame.shape[0])
-        )
-        shoulder_midpoint = (
-            int(shoulder_midpoint_x * frame.shape[1]),
-            int(shoulder_midpoint_y * frame.shape[0])
-        )
-        cv2.line(frame, shoulder_midpoint, nose_point, (0, 165, 255), 3)
-        
-        # Analyze posture and obtain a numeric stability score
-        posture_stability = analyze_upper_body_posture(results.pose_landmarks.landmark)
-        
-        # Display the numeric posture stability value on the frame
-        """cv2.putText(frame, 
-                    f"Posture Stability: {posture_stability:.2f}", 
-                    (10, 30), 
-                    cv2.FONT_HERSHEY_SIMPLEX, 
-                    0.7, 
-                    (255, 255, 255), 
-                    2)
-        """
+# Tkinter Window Setup
+r = tk.Tk()
+r.geometry("600x500")
+r.title("DeepSpaceFocus")
+
+# Create main container
+container = tk.Frame(r)
+container.pack(fill="both", expand=True)
+
+# Dictionary to store frames
+frames = {}
+
+# Menu Bar Config
+menu = Menu(r)
+r.config(menu=menu)
+
+# Function to switch frames
+def show_frame(frame):
+    frame.tkraise()
+
+# HOME PAGE 
+home_page = tk.Frame(container)
+frames["home"] = home_page
+home_page.grid(row=0, column=0, sticky="nsew")
+
+# Home Functions
+def start_monitoring():
+    global run_monitoring, monitoring_thread
+    if not run_monitoring:
+        run_monitoring = True
+        monitoring_thread = threading.Thread(target=run_concentration_monitor, daemon=True)
+        monitoring_thread.start()
+
+def stop_monitoring():
+    global run_monitoring, monitoring_thread
     
-    return frame
+    run_monitoring = False
+    monitoring_stop_event.set()
 
-# Variables to store previous values
-prev_head_pos = None
-prev_light = None
-prev_gaze = None
+    # Attempt to gracefully stop
+    try:
+        if monitoring_thread and monitoring_thread.is_alive():
+            monitoring_thread.join(timeout=2)
+    except Exception as e:
+        print(f"Error stopping monitoring thread: {e}")
+    
+    # Force close if thread doesn't respond
+    cv2.destroyAllWindows()
+    plt.close('all')
 
-# To reduce the computational power required
-plt.tight_layout()
+    # Optional: Reset the event for future use
+    monitoring_stop_event.clear()
 
-while cap.isOpened():
-    ret, frame = cap.read()
-    if not ret:
-        break
+# Home page widgets using grid
+home_title = Label(home_page, text="Welcome to DeepSpaceFocus", font=("Arial", 16, "bold"))
+home_title.grid(row=0, column=0, padx=20, pady=20, columnspan=3)
 
-    frame_count += 1
+home_info = Label(home_page, text="Your productivity assistant")
+home_info.grid(row=1, column=0, padx=20, pady=10, columnspan=3)
 
-    # Convert to RGB for MediaPipe
-    rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-    face_results = face_mesh.process(rgb_frame)
-    pose_results = pose.process(rgb_frame)
+home_description = Label(home_page, text="Use the menu above to navigate between features")
+home_description.grid(row=2, column=0, padx=20, pady=30, columnspan=3)
 
-    elapsed_time = time.time() - start_time
+monitor_start_button = ttk.Button(home_page, text="Start Monitoring", command=start_monitoring)
+monitor_start_button.grid(row=3, column=0, padx=20, pady=10)
 
-    if face_results.multi_face_landmarks and pose_results.pose_landmarks:
-        face_landmarks = face_results.multi_face_landmarks[0]
-        pose_landmarks = pose_results.pose_landmarks
-        frame = visualize_upper_body_posture(frame, pose_results)
+monitor_stop_button = ttk.Button(home_page, text="Stop Monitoring", command=stop_monitoring)
+monitor_stop_button.grid(row=3, column=1, padx=20, pady=10)
 
-        # Calculate all metrics
-        face_neutrality = calculate_face_neutrality(face_landmarks)
-        head_stability, prev_head_pos = calculate_head_stability(pose_landmarks, prev_head_pos)
-        light_stability, prev_light = calculate_light_changes(frame, prev_light)
-        eye_stability, prev_gaze = calculate_eye_gaze_stability(face_landmarks, prev_gaze)
-        posture_stability, neck_angle = analyze_upper_body_posture(pose_landmarks.landmark)
-        hunching_score, _ = detect_hunching(pose_results.pose_landmarks.landmark)
+# TIMER PAGE 
+timer_page = tk.Frame(container)
+frames["timer"] = timer_page
+timer_page.grid(row=0, column=0, sticky="nsew")
 
-        # Calculate overall concentration score
-        concentration_score = (w1 * face_neutrality + 
-                              w2 * head_stability +  
-                              w3 * eye_stability + 
-                              w4 * light_stability +
-                              w5 * posture_stability +
-                              0.1 * (1 - hunching_score))
+# Timer page widgets (from previous script)
+timer_title = Label(timer_page, text="Break Timer", font=("Arial", 14, "bold"))
+timer_title.grid(row=0, column=0, padx=20, pady=20, columnspan=3)
 
-        # Store data
-        time_stamps.append(elapsed_time)
-        head_stability_values.append(head_stability)
-        face_neutrality_values.append(face_neutrality)
-        eye_gaze_values.append(eye_stability)
-        light_change_values.append(light_stability)
-        posture_values.append(posture_stability)
-        concentration_scores.append(concentration_score)
+time_unit_label = Label(timer_page, text="Select time unit:")
+time_unit_label.grid(row=1, column=0, padx=10, pady=10, sticky="e")
 
-        # Draw face landmarks on the image
-        # Marking Forehead and Chin
-        forehead = face_landmarks.landmark[10]
-        chin = face_landmarks.landmark[152]
+time_unit_var = StringVar()
+combo_box = ttk.Combobox(timer_page, textvariable=time_unit_var, 
+                         values=["Minutes", "Seconds", "Hours"])
+combo_box.grid(row=1, column=1, padx=10, pady=10, sticky="w")
+combo_box.set("Minutes")
 
-        forehead_x, forehead_y = int(forehead.x * frame.shape[1]), int(forehead.y * frame.shape[0])
-        chin_x, chin_y = int(chin.x * frame.shape[1]), int(chin.y * frame.shape[0])
-        
-        # Mark eyes using standard face mesh indices
-        left_eye = face_landmarks.landmark[LEFT_IRIS_CENTER_APPROX]
-        right_eye = face_landmarks.landmark[RIGHT_IRIS_CENTER_APPROX]
-        
-        left_eye_x, left_eye_y = int(left_eye.x * frame.shape[1]), int(left_eye.y * frame.shape[0])
-        right_eye_x, right_eye_y = int(right_eye.x * frame.shape[1]), int(right_eye.y * frame.shape[0])
-        
-        # Draw landmarks
-        cv2.circle(frame, (forehead_x, forehead_y), 5, (0, 255, 0), -1)
-        cv2.circle(frame, (chin_x, chin_y), 5, (0, 0, 255), -1)
-        cv2.line(frame, (forehead_x, forehead_y), (chin_x, chin_y), (255, 255, 0), 2)
-        
-        # Draw eye markers
-        cv2.circle(frame, (left_eye_x, left_eye_y), 5, (255, 0, 255), -1)
-        cv2.circle(frame, (right_eye_x, right_eye_y), 5, (255, 0, 255), -1)
-        
-        # Add text with metrics
-        cv2.putText(frame, f"Concentration: {concentration_score:.2f}", (10, 30), 
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
+selected_unit_label = Label(timer_page, text="")
+selected_unit_label.grid(row=1, column=2, padx=10, pady=10, sticky="w")
 
-        # Update plots
-        if frame_count >= update_interval:
-            head_line.set_xdata(time_stamps)
-            head_line.set_ydata(head_stability_values)
+time_value_label = Label(timer_page, text="Enter time value:")
+time_value_label.grid(row=2, column=0, padx=10, pady=10, sticky="e")
+
+time_entry = Entry(timer_page)
+time_entry.grid(row=2, column=1, padx=10, pady=10, sticky="w")
+
+def select_time(event):
+    selected_time = time_unit_var.get()
+    selected_unit_label.config(text="Selected: " + selected_time)
+
+combo_box.bind("<<ComboboxSelected>>", select_time)
+
+def start_timer():
+    try: 
+        time_value = float(time_entry.get())
+
+        time_unit = time_unit_var.get()
+        if time_unit == "Minutes":
+            seconds = time_value * 60
+        elif time_unit == "Hours":
+            seconds = time_value * 3600
+        else:
+            seconds = time_value
+
+        timer_window = tk.Toplevel()
+        timer_window.title("Timer")
+        timer_window.geometry("400x150")
+
+        countdown_label = Label(timer_window, text="Time Remaining:", font=("Arial", 12))
+        countdown_label.pack(pady=10)
+
+        time_left_label = Label(timer_window, text="", font=("Arial", 24))
+        time_left_label.pack(pady=10)
+
+        stop_button = tk.Button(timer_window, text="Stop Timer", bg="#F44336", fg="white", 
+                               command=timer_window.destroy)
+        stop_button.pack(pady=10)
+
+        def update_countdown(remaining):
+            if remaining <= 0:
+                time_left_label.config(text="Time's up!")
+                messagebox.showinfo("Break Timer", "Your break time is over!")
+                timer_window.destroy()
+                return
             
-            face_line.set_xdata(time_stamps)
-            face_line.set_ydata(face_neutrality_values)
-            
-            eye_line.set_xdata(time_stamps)
-            eye_line.set_ydata(eye_gaze_values)
-            
-            light_line.set_xdata(time_stamps)
-            light_line.set_ydata(light_change_values)
+            mins, secs = divmod(int(remaining), 60)
+            hours, mins = divmod(mins, 60)
 
-            posture_line.set_xdata(time_stamps)
-            posture_line.set_ydata(posture_values)
+            if hours > 0:
+                time_left_label.config(text=f"{hours:02d}:{mins:02d}:{secs:02d}")
+            else:
+                time_left_label.config(text=f"{mins:02d}:{secs:02d}")
 
-            concentration_line.set_xdata(time_stamps)
-            concentration_line.set_ydata(concentration_scores)
-            
-            # Adjust plot limits
-            ax1.set_xlim(0, max(10, elapsed_time))
-            ax1.set_ylim(0, 1.1)
+            timer_window.after(1000, update_countdown, remaining - 1)
+        
+        update_countdown(seconds)
+    except ValueError:
+        messagebox.showerror("Input Error", "Please enter a valid number")    
 
-            ax2.set_xlim(0, max(10, elapsed_time))
-              
-            plt.draw()
-            plt.pause(0.01)
+# Start button
+start_button = tk.Button(timer_page, text="Start Timer", bg="#4CAF50", fg="white", command=start_timer)
+start_button.grid(row=3, column=0, columnspan=3, padx=20, pady=20)    
 
-            # Resetting the frame counter 
-            frame_count = 0 
+# HELP PAGE
+help_page = tk.Frame(container)
+frames["help"] = help_page
+help_page.grid(row=0, column=0, sticky="nsew")
 
-    # Display the frame
-    cv2.imshow("Concentration Monitoring", frame)
+# Help page widgets
+help_title = Label(help_page, text="Help & Instructions", font=("Arial", 14, "bold"))
+help_title.grid(row=0, column=0, padx=20, pady=20, columnspan=2)
 
-    if cv2.waitKey(1) & 0xFF == ord('q'):
-        break
+help_subtitle = Label(help_page, text="How to use DeepSpaceFocus:", font=("Arial", 12))
+help_subtitle.grid(row=1, column=0, padx=20, pady=10, sticky="w", columnspan=2)
 
-cap.release()
-cv2.destroyAllWindows()
-plt.ioff()
-plt.show()
+help_text1 = Label(help_page, text="1. Use the Timer feature to set break reminders")
+help_text1.grid(row=2, column=0, padx=30, pady=5, sticky="w", columnspan=2)
+
+help_text2 = Label(help_page, text="2. Navigate using the menu bar at the top")
+help_text2.grid(row=3, column=0, padx=30, pady=5, sticky="w", columnspan=2)
+
+help_text3 = Label(help_page, text="3. Contact support at support@deepspacefocus.com")
+help_text3.grid(row=4, column=0, padx=30, pady=5, sticky="w", columnspan=2)
+
+# MENU CONFIGURATION
+# Home Menu
+home_menu = Menu(menu, tearoff=0)
+menu.add_cascade(label="Home", menu=home_menu)
+home_menu.add_command(label="Home", command=lambda: show_frame(home_page))
+
+# Timer Menu
+timer_menu = Menu(menu, tearoff=0)
+menu.add_cascade(label="Timer", menu=timer_menu)
+timer_menu.add_command(label="Set Timer", command=lambda: show_frame(timer_page))
+
+# Help Menu
+help_menu = Menu(menu, tearoff=0)
+menu.add_cascade(label="Help", menu=help_menu)
+help_menu.add_command(label="Controls", command=lambda: show_frame(help_page))
+
+# Configure grid weights to make frames expandable
+container.grid_rowconfigure(0, weight=1)
+container.grid_columnconfigure(0, weight=1)
+
+# Make all frames expand to fill the container
+for frame in frames.values():
+    frame.grid_rowconfigure(0, weight=1)
+    frame.grid_columnconfigure(0, weight=1)
+
+# Show home page initially
+show_frame(frames["home"])
+
+r.mainloop()
