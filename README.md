@@ -1,21 +1,32 @@
 # Using Computer Vision to improve concentration/attention on a task 
 
-- Built using Mediapipe, OpenCV, scikit-learn
+- Built using Mediapipe, OpenCV, Tkinter 
 
-# Running the Program
+# Running the Program On Your Own Editor 
 
-1. Start by pip installing requirements.txt
+1. Start by pip installing requirements.txt (pyinstaller is not needed)
 
 pip install -r requirements.txt 
 
-2. Run the Tkinter file (window.py)
+2. Run FocusGuard.py or FocusGuard2.py
 
-3. Interact with the program by clicking on buttons  
+3. Interact with the program by Start Monitoring, and Stop Monitoring when not needed
 
-# Features 
-- Automated Notifications 
-- Break Timer 
-- Tracking Attention
+4. Go in the Timer Menu to set a Break Timer 
+
+# FocusGuard.py Features
+
+- Tracks Concentration and Graphs it using Matplotlib
+- Full application with automated notifications upon entering below a concentration score threshold
+
+# FocusGuard2.py Features
+
+- Tracks Concentration and Graphs it using Matplotlib
+- Does not include automated notifications 
+
+
+
+# Includes Flowcharts of the sources 
 
 
 
