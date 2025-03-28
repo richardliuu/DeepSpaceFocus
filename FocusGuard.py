@@ -51,9 +51,6 @@ def initialize_mediapipe_solutions():
         return None, None
 
 def apply_modern_theme(r):
-    """
-    Apply a modern, dark-themed styling to Tkinter windows
-    """
     # Configure root window style
     r.configure(bg='#1E1E1E')  
     
@@ -256,10 +253,6 @@ mp_face_mesh = mp.solutions.face_mesh
 mp_pose = mp.solutions.pose
 
 def calculate_face_neutrality(face_landmarks):
-    """
-    Calculate face neutrality based on landmark positions
-    Lower values mean more neutral expression
-    """
     # Mouth landmarks
     left_mouth = face_landmarks.landmark[61]
     right_mouth = face_landmarks.landmark[291]
@@ -279,9 +272,6 @@ def calculate_face_neutrality(face_landmarks):
     return max(0.5, min(1.0, neutrality * 3))
 
 def calculate_head_stability(pose_landmarks, prev_head_pos=None):
-    """
-    Higher value means more stable (less movement)
-    """
     if pose_landmarks:
         nose = pose_landmarks.landmark[mp_pose.PoseLandmark.NOSE]
         
@@ -300,9 +290,6 @@ def calculate_head_stability(pose_landmarks, prev_head_pos=None):
     return 0.5, prev_head_pos if prev_head_pos is not None else (0.5, 0.5)
 
 def calculate_light_changes(frame, prev_light=None):
-    """
-    Higher value means more stable lighting
-    """
     current_light = np.mean(cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY))
     
     if prev_light is None:
@@ -317,10 +304,6 @@ def calculate_light_changes(frame, prev_light=None):
     return stability, current_light
 
 def calculate_eye_gaze_stability(face_landmarks, prev_gaze=None):
-    """
-    Calculate eye gaze stability by tracking eye landmarks
-    Higher value means more stable gaze
-    """
     # Standard face mesh eye landmark indices
     LEFT_IRIS_CENTER_APPROX = 159
     RIGHT_IRIS_CENTER_APPROX = 386
@@ -354,15 +337,6 @@ def calculate_eye_gaze_stability(face_landmarks, prev_gaze=None):
     return stability, avg_gaze
 
 def analyze_upper_body_posture(landmarks):
-    """
-    Enhanced posture stability analysis
-    
-    Args:
-        landmarks (list): MediaPipe pose landmarks
-    
-    Returns:
-        tuple: (Posture stability score, Neck angle)
-    """
     try:
         # Validate landmark visibility
         landmark_visibility = [
