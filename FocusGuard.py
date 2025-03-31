@@ -591,7 +591,7 @@ def run_concentration_monitor():
     update_interval = 10
     start_time = time.time()
 
-    CONCENTRATION_THRESHOLD = 0.6 
+    CONCENTRATION_THRESHOLD = 0.4 
     LOW_CONCENTRATION_WARNING = False 
 
     while run_monitoring and cap.isOpened():
