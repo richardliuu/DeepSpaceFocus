@@ -138,7 +138,7 @@ class SmoothPopup:
                 self.popup.geometry(f"{popup_width}x{popup_height}+{screen_width}+{screen_height//2}")
                 
                 # Popup styling
-                self.popup.configure(bg='#1E1E1E')  # Dark background
+                self.popup.configure(bg='#1E1E1E') 
                 
                 # Title label
                 title_label = ttk.Label(
@@ -195,7 +195,6 @@ class SmoothPopup:
             target_x = screen_width - 320
             
             while current_x > target_x:
-                # Use after method for thread-safe updates
                 def update_geometry(x):
                     try:
                         if self.popup and self.popup.winfo_exists():
@@ -210,7 +209,6 @@ class SmoothPopup:
             time.sleep(self.duration)
             
             while current_x < screen_width:
-                # Use after method for thread-safe updates
                 def update_geometry(x):
                     try:
                         if self.popup and self.popup.winfo_exists():
@@ -448,11 +446,6 @@ def analyze_upper_body_posture(landmarks):
         return 0.5, 0
 
 def calculate_angle(a, b, c):
-    """
-    Calculate angle between three points
-    Args:
-        a, b, c (list or numpy array): Landmark coordinates [x, y]
-    """
     a = np.array(a)
     b = np.array(b)
     c = np.array(c)
@@ -463,15 +456,6 @@ def calculate_angle(a, b, c):
     return angle if angle <= 180 else 360 - angle
 
 def detect_hunching(landmarks):
-    """
-    Detect hunching by analyzing the relative positions of shoulders, spine, and head
-    
-    Args:
-        landmarks (list): MediaPipe pose landmarks
-    
-    Returns:
-        tuple: (hunching_score, diagnostic_details)
-    """
     try:
         # Key landmarks for hunching detection
         nose = landmarks[mp.solutions.pose.PoseLandmark.NOSE.value]
@@ -489,7 +473,6 @@ def detect_hunching(landmarks):
             right_hip.visibility
         ]
         
-        # Reject if any critical landmark is poorly visible
         if any(vis < 0.5 for vis in visibility_check):
             return 0, {"error": "Insufficient landmark visibility"}
         
@@ -504,13 +487,11 @@ def detect_hunching(landmarks):
         ]
         
         # Calculate vertical alignment
-        # Ideal spine should be relatively straight
         spine_angle = np.arctan2(
             shoulder_midpoint[1] - hip_midpoint[1],
             shoulder_midpoint[0] - hip_midpoint[0]
         ) * 180 / np.pi
         
-        # Calculate head-shoulder relationship
         # How far forward is the head compared to shoulders
         head_forward_deviation = nose.x - shoulder_midpoint[0]
         head_vertical_deviation = nose.y - shoulder_midpoint[1]
@@ -521,16 +502,16 @@ def detect_hunching(landmarks):
         
         # Hunching indicators
         hunching_indicators = {
-            "spine_angle": abs(spine_angle),  # Deviation from vertical
+            "spine_angle": abs(spine_angle),  
             "head_forward_ratio": head_offset_ratio,
             "vertical_head_drop": head_vertical_deviation
         }
         
         # Scoring mechanism
         # Lower scores indicate more hunching
-        MAX_ACCEPTABLE_SPINE_ANGLE = 20  # degrees
-        MAX_HEAD_FORWARD_RATIO = 0.3  # proportion of shoulder width
-        MAX_VERTICAL_DROP = 0.1  # proportion of body height
+        MAX_ACCEPTABLE_SPINE_ANGLE = 20  
+        MAX_HEAD_FORWARD_RATIO = 0.3  
+        MAX_VERTICAL_DROP = 0.1  
         
         # Calculate hunching score
         spine_score = 1 - min(1, abs(spine_angle) / MAX_ACCEPTABLE_SPINE_ANGLE)
@@ -657,7 +638,6 @@ def run_concentration_monitor():
                 )
                 LOW_CONCENTRATION_WARNED = True
 
-            # Reset warning flag if concentration improves
             if concentration_score >= CONCENTRATION_THRESHOLD:
                 LOW_CONCENTRATION_WARNED = False
 
@@ -699,7 +679,6 @@ def run_concentration_monitor():
                 plt.draw()
                 plt.pause(0.01)
 
-                # Resetting the frame counter 
                 frame_count = 0 
 
     try:
@@ -708,7 +687,6 @@ def run_concentration_monitor():
             if not ret:
                 break
 
-            # Add a periodic check for stop condition
             if not run_monitoring:
                 monitoring_stop_event.set()
                 break
@@ -722,12 +700,11 @@ def run_concentration_monitor():
         print(f"Error in concentration monitoring: {e}")
     
     finally:
-        # Comprehensive cleanup
         try:
             cap.release()
             cv2.destroyAllWindows()
             plt.close(fig)
-            plt.close('all')  # Ensure all matplotlib windows are closed
+            plt.close('all') 
         except Exception as cleanup_error:
             print(f"Error during cleanup: {cleanup_error}")
 
@@ -772,7 +749,6 @@ def stop_monitoring():
     run_monitoring = False
     monitoring_stop_event.set()
 
-    # Attempt to gracefully stop
     try:
         if monitoring_thread and monitoring_thread.is_alive():
             monitoring_thread.join(timeout=2)
@@ -783,7 +759,6 @@ def stop_monitoring():
     cv2.destroyAllWindows()
     plt.close('all')
 
-    # Optional: Reset the event for future use
     monitoring_stop_event.clear()
 
 # Home page widgets using grid
@@ -807,7 +782,7 @@ timer_page = tk.Frame(container)
 frames["timer"] = timer_page
 timer_page.grid(row=0, column=0, sticky="nsew")
 
-# Timer page widgets (from previous script)
+# Timer page widgets 
 timer_title = Label(timer_page, text="Break Timer", font=("Arial", 14, "bold"))
 timer_title.grid(row=0, column=0, padx=20, pady=20, columnspan=3)
 
@@ -907,7 +882,8 @@ help_text2.grid(row=3, column=0, padx=30, pady=5, sticky="w", columnspan=2)
 help_text3 = Label(help_page, text="3. Click Start Monitoring to engage the webcam, and Stop Monitoring to Stop")
 help_text3.grid(row=4, column=0, padx=30, pady=5, sticky="w", columnspan=2)
 
-# MENU CONFIGURATION
+# ==== MENU CONFIGURATION ====
+
 # Home Menu
 home_menu = Menu(menu, tearoff=0)
 menu.add_cascade(label="Home", menu=home_menu)
@@ -923,7 +899,6 @@ help_menu = Menu(menu, tearoff=0)
 menu.add_cascade(label="Help", menu=help_menu)
 help_menu.add_command(label="Controls", command=lambda: show_frame(help_page))
 
-# Configure grid weights to make frames expandable
 container.grid_rowconfigure(0, weight=1)
 container.grid_columnconfigure(0, weight=1)
 
@@ -932,7 +907,6 @@ for frame in frames.values():
     frame.grid_rowconfigure(0, weight=1)
     frame.grid_columnconfigure(0, weight=1)
 
-# Show home page initially
 show_frame(frames["home"])
 
 setup_themed_tkinter(r)
