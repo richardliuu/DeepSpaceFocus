@@ -1,5 +1,3 @@
-# ====== MODEL INCLUDES POPUP ====== 
-# FIRST PART OF THE EXPERIMENT
 import os
 import sys
 import matplotlib
