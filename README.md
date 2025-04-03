@@ -19,13 +19,6 @@ pip install -r requirements.txt
 - Tracks Concentration and Graphs it using Matplotlib
 - Full application with automated notifications upon entering below a concentration score threshold
 
-# FocusGuard2.py Features
-
-- Tracks Concentration and Graphs it using Matplotlib
-- Does not include automated notifications 
-
-
-
 # Includes Flowcharts of the sources 
 
 
