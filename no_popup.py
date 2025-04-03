@@ -382,6 +382,84 @@ def run_concentration_monitor():
     if face_mesh is None or pose is None:
         messagebox.showerror("Initialization Error", "Could not initialize MediaPipe solutions")
         return
+    
+    plot_queue = queue.Queue()
+    
+    # Setting up Matplotlib in the main graph 
+    def update_plot():
+        plt.ion()
+        fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(8, 6))
+
+        # Primary plot for individual metrics
+        ax1.set_title("Individual Concentration Metrics")
+        ax1.set_xlabel("Time (seconds)")
+        ax1.set_ylabel("Metric Value")
+        head_line, = ax1.plot([], [], 'r-', label="Head Stability")
+        face_line, = ax1.plot([], [], 'g-', label="Face Neutrality")
+        eye_line, = ax1.plot([], [], 'b-', label="Eye Gaze Stability")
+        light_line, = ax1.plot([], [], 'y-', label="Light Stability")
+        posture_line, = ax1.plot([], [], 'p-', label="Posture Stability")
+        ax1.legend(loc="upper right")
+
+        # Secondary plot for overall concentration score
+        ax2.set_title("Overall Concentration Score")
+        ax2.set_xlabel("Time (seconds)")
+        ax2.set_ylabel("Concentration Score")
+        concentration_line, = ax2.plot([], [], 'k-', linewidth=2)
+        ax2.set_ylim(0, 1)
+
+        plt.tight_layout()
+
+        while run_monitoring:
+            try:
+                # Non-blocking check for new data
+                data = plot_queue.get(timeout=1)
+                
+                # Unpack the data
+                time_stamps, metrics = data
+
+                # Update individual metric plots
+                head_line.set_xdata(time_stamps)
+                head_line.set_ydata(metrics['head_stability'])
+                
+                face_line.set_xdata(time_stamps)
+                face_line.set_ydata(metrics['face_neutrality'])
+                
+                eye_line.set_xdata(time_stamps)
+                eye_line.set_ydata(metrics['eye_gaze'])
+                
+                light_line.set_xdata(time_stamps)
+                light_line.set_ydata(metrics['light_change'])
+
+                posture_line.set_xdata(time_stamps)
+                posture_line.set_ydata(metrics['posture'])
+
+                concentration_line.set_xdata(time_stamps)
+                concentration_line.set_ydata(metrics['concentration_scores'])
+                
+                # Adjust plot limits
+                ax1.set_xlim(0, max(10, time_stamps[-1] if time_stamps else 0))
+                ax1.set_ylim(0, 1.1)
+
+                ax2.set_xlim(0, max(10, time_stamps[-1] if time_stamps else 0))
+                  
+                plt.draw()
+                plt.pause(0.01)
+
+            except queue.Empty:
+                # No new data, just continue
+                continue
+            except Exception as plot_error:
+                print(f"Plotting error: {plot_error}")
+                break
+
+        plt.close('all')
+
+    # Start the plotting thread in the main thread
+    plot_thread = threading.Thread(target=update_plot, daemon=True)
+    plot_thread.start()
+
+    cap = cv2.VideoCapture(0)
 
     # Weights for concentration score calculation
     w1, w2, w3, w4, w5 = 0.3, 0.3, 0.15, 0.05, 0.10 
@@ -394,33 +472,6 @@ def run_concentration_monitor():
     posture_values = []
     concentration_scores = []
 
-    # Set up plotting
-    plt.ion() 
-    fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(8, 6))
-
-    # Primary plot for individual metrics
-    ax1.set_title("Individual Concentration Metrics")
-    ax1.set_xlabel("Time (seconds)")
-    ax1.set_ylabel("Metric Value")
-    head_line, = ax1.plot([], [], 'r-', label="Head Stability")
-    face_line, = ax1.plot([], [], 'g-', label="Face Neutrality")
-    eye_line, = ax1.plot([], [], 'b-', label="Eye Gaze Stability")
-    light_line, = ax1.plot([], [], 'y-', label="Light Stability")
-    posture_line, = ax1.plot([], [], 'p-', label="Posture Stability")
-    ax1.legend(loc="upper right")
-
-    # Secondary plot for overall concentration score
-    ax2.set_title("Overall Concentration Score")
-    ax2.set_xlabel("Time (seconds)")
-    ax2.set_ylabel("Concentration Score")
-    concentration_line, = ax2.plot([], [], 'k-', linewidth=2)
-    ax2.set_ylim(0, 1)
-
-    plt.tight_layout()
-
-    # Open camera
-    cap = cv2.VideoCapture(0)
-
     # Variables to store previous values
     prev_head_pos = None
     prev_light = None
@@ -431,90 +482,78 @@ def run_concentration_monitor():
     update_interval = 10
     start_time = time.time()
 
-    while run_monitoring and cap.isOpened():
-        ret, frame = cap.read()
-        if not ret:
-            break
-
-        frame_count += 1
-        elapsed_time = time.time() - start_time
-
-        # Convert to RGB for MediaPipe
-        rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-        face_results = face_mesh.process(rgb_frame)
-        pose_results = pose.process(rgb_frame)
-
-        if face_results.multi_face_landmarks and pose_results.pose_landmarks:
-            face_landmarks = face_results.multi_face_landmarks[0]
-            pose_landmarks = pose_results.pose_landmarks
-
-            # Calculate all metrics
-            face_neutrality = calculate_face_neutrality(face_landmarks)
-            head_stability, prev_head_pos = calculate_head_stability(pose_landmarks, prev_head_pos)
-            light_stability, prev_light = calculate_light_changes(frame, prev_light)
-            eye_stability, prev_gaze = calculate_eye_gaze_stability(face_landmarks, prev_gaze)
-            posture_stability, neck_angle = analyze_upper_body_posture(pose_landmarks.landmark)
-            hunching_score, _ = detect_hunching(pose_results.pose_landmarks.landmark)
-
-            # Calculate overall concentration score
-            concentration_score = (w1 * face_neutrality + 
-                                  w2 * head_stability +  
-                                  w3 * eye_stability + 
-                                  w4 * light_stability +
-                                  w5 * posture_stability +
-                                  0.1 * (1 - hunching_score))
-            
-            # Store data
-            time_stamps.append(elapsed_time)
-            head_stability_values.append(head_stability)
-            face_neutrality_values.append(face_neutrality)
-            eye_gaze_values.append(eye_stability)
-            light_change_values.append(light_stability)
-            posture_values.append(posture_stability)
-            concentration_scores.append(concentration_score)
-
-            # Update plots
-            if frame_count >= update_interval:
-                head_line.set_xdata(time_stamps)
-                head_line.set_ydata(head_stability_values)
-                face_line.set_xdata(time_stamps)
-                face_line.set_ydata(face_neutrality_values)
-                eye_line.set_xdata(time_stamps)
-                eye_line.set_ydata(eye_gaze_values)
-                light_line.set_xdata(time_stamps)
-                light_line.set_ydata(light_change_values)
-                posture_line.set_xdata(time_stamps)
-                posture_line.set_ydata(posture_values)
-                concentration_line.set_xdata(time_stamps)
-                concentration_line.set_ydata(concentration_scores)
-                
-                # Adjust plot limits
-                ax1.set_xlim(0, max(10, elapsed_time))
-                ax1.set_ylim(0, 1.1)
-
-                ax2.set_xlim(0, max(10, elapsed_time))
-                  
-                plt.draw()
-                plt.pause(0.01)
-
-                # Resetting the frame counter 
-                frame_count = 0 
-
     try:
-        while run_monitoring and not monitoring_stop_event.is_set() and cap.isOpened():
+        while run_monitoring and cap.isOpened():
             ret, frame = cap.read()
             if not ret:
+                print("Failed to Capture Frame")
                 break
 
-            # Add a periodic check for stop condition
-            if not run_monitoring:
-                monitoring_stop_event.set()
-                break
-
-            # Existing frame display and key check
             cv2.imshow("Concentration Monitoring", frame)
-            if cv2.waitKey(1) & 0xFF == ord('q'):
+            
+            key = cv2.waitKey(1) & 0xFF
+            if key == ord('q'):
+                print("User requested stop")
                 break
+
+            frame_count += 1
+            elapsed_time = time.time() - start_time
+
+            # Convert to RGB for MediaPipe
+            rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+            face_results = face_mesh.process(rgb_frame)
+            pose_results = pose.process(rgb_frame)
+
+            if face_results.multi_face_landmarks and pose_results.pose_landmarks:
+                face_landmarks = face_results.multi_face_landmarks[0]
+                pose_landmarks = pose_results.pose_landmarks
+
+                # Calculate all metrics
+                face_neutrality = calculate_face_neutrality(face_landmarks)
+                head_stability, prev_head_pos = calculate_head_stability(pose_landmarks, prev_head_pos)
+                light_stability, prev_light = calculate_light_changes(frame, prev_light)
+                eye_stability, prev_gaze = calculate_eye_gaze_stability(face_landmarks, prev_gaze)
+                posture_stability, neck_angle = analyze_upper_body_posture(pose_landmarks.landmark)
+                hunching_score, _ = detect_hunching(pose_results.pose_landmarks.landmark)
+
+                # Calculate overall concentration score
+                concentration_score = (w1 * face_neutrality + 
+                                    w2 * head_stability +  
+                                    w3 * eye_stability + 
+                                    w4 * light_stability +
+                                    w5 * posture_stability +
+                                    0.1 * (1 - hunching_score))
+                
+                # Store data
+                time_stamps.append(elapsed_time)
+                head_stability_values.append(head_stability)
+                face_neutrality_values.append(face_neutrality)
+                eye_gaze_values.append(eye_stability)
+                light_change_values.append(light_stability)
+                posture_values.append(posture_stability)
+                concentration_scores.append(concentration_score)
+
+                # Update plots
+                if frame_count >= update_interval:
+                                        # Prepare metrics dictionary for plotting
+                        metrics = {
+                            'head_stability': head_stability_values,
+                            'face_neutrality': face_neutrality_values,
+                            'eye_gaze': eye_gaze_values,
+                            'light_change': light_change_values,
+                            'posture': posture_values,
+                            'concentration_scores': concentration_scores
+                        }
+                        
+                        # Put data in queue for main thread to process
+                        try:
+                            plot_queue.put((time_stamps, metrics), block=False)
+                        except queue.Full:
+                            # If queue is full, skip this update
+                            pass
+
+                        # Reset frame counter
+                        frame_count = 0 
 
     except Exception as e:
         print(f"Error in concentration monitoring: {e}")
@@ -522,15 +561,25 @@ def run_concentration_monitor():
     finally:
         # Comprehensive cleanup
         try:
+            # Stop monitoring
+            run_monitoring = False
+            monitoring_stop_event.set()
+
+            # Release camera resources
             cap.release()
             cv2.destroyAllWindows()
-            plt.close(fig)
-            plt.close('all')  # Ensure all matplotlib windows are closed
+
+            # Close all matplotlib figures
+            plt.close('all')
+
+            # Wait for plotting thread to finish
+            plot_thread.join(timeout=2)
+
         except Exception as cleanup_error:
             print(f"Error during cleanup: {cleanup_error}")
 
     print("Concentration monitoring stopped.")
-
+        
 # Tkinter Window Setup
 r = tk.Tk()
 r.geometry("600x500")
