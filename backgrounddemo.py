@@ -1,3 +1,6 @@
+# ==== For the Background Demonstration of DeepSpacefocus ====
+# Gets into the behind the scences of the application 
+
 import cv2
 import mediapipe as mp
 import matplotlib.pyplot as plt
